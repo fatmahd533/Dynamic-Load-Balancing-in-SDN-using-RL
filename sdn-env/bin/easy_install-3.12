@@ -1,0 +1,7 @@
+#!/home/dell/sdn_proj/sdn-env/bin/python3
+import sys
+from setuptools.command.easy_install import main
+if __name__ == '__main__':
+    if sys.argv[0].endswith('.exe'):
+        sys.argv[0] = sys.argv[0][:-4]
+    sys.exit(main())
