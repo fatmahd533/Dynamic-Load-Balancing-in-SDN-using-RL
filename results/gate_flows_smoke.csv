@@ -1,0 +1,13 @@
+algorithm,rep,src,dst,port,thr_mbps,loss_pct,jitter_ms,failed
+random_path,1,h6,h2,5100,8.39,0.0,0.025,0
+random_path,1,h3,h6,5101,7.03,0.0,2.283,0
+random_path,1,h7,h3,5102,5.9,0.0,2.701,0
+random_path,1,h4,h7,5103,6.34,0.0,3.242,0
+random_path,1,h2,h8,5104,4.19,0.0,5.368,0
+random_path,1,h8,h4,5105,6.31,0.0,3.638,0
+least_congested,1,h6,h2,5100,8.39,0.0,0.016,0
+least_congested,1,h3,h6,5101,8.39,0.0,0.018,0
+least_congested,1,h7,h3,5102,8.39,0.0,0.012,0
+least_congested,1,h4,h7,5103,8.39,0.0,0.016,0
+least_congested,1,h2,h8,5104,8.39,0.0,0.014,0
+least_congested,1,h8,h4,5105,8.39,0.0,0.014,0

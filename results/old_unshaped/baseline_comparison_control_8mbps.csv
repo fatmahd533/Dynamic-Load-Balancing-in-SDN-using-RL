@@ -1,0 +1,11 @@
+algorithm,trial,h2_throughput_mbps,timestamp
+round_robin,1,8.5,1789987957.3479733
+round_robin,2,8.51,1789987981.5135958
+round_robin,3,8.52,1789988005.6668847
+round_robin,4,8.5,1789988029.8405256
+round_robin,5,8.5,1789988053.9990892
+least_congested,1,8.51,1789988136.0597212
+least_congested,2,8.51,1789988160.2279654
+least_congested,3,8.51,1789988184.3827553
+least_congested,4,8.5,1789988208.5673587
+least_congested,5,8.51,1789988232.726334

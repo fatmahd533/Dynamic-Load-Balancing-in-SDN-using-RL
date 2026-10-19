@@ -1,0 +1,13 @@
+algorithm,rep,src,dst,port,thr_mbps,loss_pct,jitter_ms,failed
+lcp_pending,1,h8,h2,5100,4.86,0.0,4.985,0
+lcp_pending,1,h6,h1,5101,8.41,0.0,2.166,0
+lcp_pending,1,h4,h6,5102,8.41,0.0,1.728,0
+lcp_pending,1,h7,h3,5103,4.93,0.0,6.521,0
+lcp_pending,1,h1,h5,5104,4.93,0.0,9.549,0
+lcp_pending,1,h3,h7,5105,4.98,0.0,6.407,0
+least_congested,1,h8,h2,5100,4.84,0.0,9.406,0
+least_congested,1,h6,h1,5101,8.4,0.0,0.28,0
+least_congested,1,h4,h6,5102,4.86,0.0,5.067,0
+least_congested,1,h7,h3,5103,4.86,0.0,9.389,0
+least_congested,1,h1,h5,5104,8.42,0.0,1.247,0
+least_congested,1,h3,h7,5105,4.86,0.0,4.963,0

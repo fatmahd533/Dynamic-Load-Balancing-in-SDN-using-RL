@@ -1,0 +1,1915 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SDN Routing Replay</title>
+<style>
+  :root{
+    --bg:#050b14; --bg2:#07101c; --panel:#09131f; --panel2:#0b1828; --border:#133049; --border2:#1c4565;
+    --fg:#e6f0fa; --muted:#7f95ab; --dim:#4a6076;
+    --accent:#1e9bff; --cyan:#22d3ee; --up:#19d3a8; --anomaly:#ff4d5e; --down:#f0a93b; --decision:#2f8bff;
+    --mono:"SF Mono","Menlo","Consolas",monospace;
+    --sans:Inter,-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; color:var(--fg); font-family:var(--sans); font-size:13px;
+    background:radial-gradient(1200px 600px at 20% -10%, #0a2036 0%, transparent 60%), var(--bg);
+    min-height:100vh;
+  }
+  #root{max-width:none; width:100%; margin:0; padding:0 clamp(16px, 2vw, 40px) 28px;}
+  svg{display:block;}
+
+  select, button, input[type=text]{
+    background:var(--panel2); color:var(--fg); border:1px solid var(--border2);
+    border-radius:8px; padding:8px 12px; font-size:13px; font-family:var(--sans); cursor:pointer; outline:none;
+  }
+  select:hover, button:hover, input[type=text]:hover{border-color:#2c6a98;}
+  select:focus, input[type=text]:focus{border-color:var(--accent);}
+  button:disabled, select:disabled, input:disabled{opacity:.45; cursor:default;}
+  input[type=text]{cursor:text; font-family:var(--mono);}
+  button.danger{border-color:#6b2530; color:#ff8794; background:rgba(255,77,94,.06);}
+  button.danger:hover{border-color:var(--anomaly);}
+  .icon-btn{display:inline-flex; align-items:center; justify-content:center; padding:5px; border-radius:6px; border-color:transparent; background:transparent; color:var(--muted);}
+
+  /* ---------- top bar ---------- */
+  .topbar{display:flex; align-items:center; gap:16px; flex-wrap:wrap; padding:14px 0 16px; border-bottom:1px solid var(--border); margin-bottom:18px;}
+  .brand{display:flex; align-items:center; gap:12px; color:var(--accent);}
+  .brand h1{margin:0; font-size:20px; font-weight:700; color:var(--fg); letter-spacing:.2px;}
+  .live-badge{
+    display:inline-flex; align-items:center; gap:7px; font-size:12px; font-weight:600; letter-spacing:.04em;
+    color:var(--anomaly); background:rgba(255,77,94,.10); border:1px solid rgba(255,77,94,.7);
+    border-radius:999px; padding:4px 12px;
+  }
+  .live-dot{width:7px; height:7px; border-radius:50%; background:var(--anomaly); animation:pulse 1.2s infinite;}
+  @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.25;}}
+  .runid{display:flex; align-items:center; gap:6px; color:var(--muted); font-size:12.5px; padding-left:16px; border-left:1px solid var(--border);}
+  .runid b{color:var(--fg); font-weight:500; font-family:var(--mono); font-size:12px;}
+  .spacer{flex:1;}
+
+  .runform-wrap{display:flex; flex-direction:column; align-items:flex-end; gap:6px;}
+  .runform{display:flex; align-items:flex-end; gap:10px; flex-wrap:wrap;}
+  .rf-field{display:flex; flex-direction:column; gap:3px;}
+  .rf-label{font-size:10px; color:var(--dim); text-transform:uppercase; letter-spacing:.06em; padding-left:2px;}
+  .rf-arrow{color:var(--dim); padding-bottom:9px;}
+  button.run{display:inline-flex; align-items:center; gap:8px; background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; padding:8px 20px; box-shadow:0 0 18px rgba(30,155,255,.35);}
+  button.run:hover{background:#3aa9ff; border-color:#3aa9ff;}
+  button.run:disabled{box-shadow:none;}
+  .form-msg{font-size:12px; font-family:var(--mono); max-width:560px; text-align:right;}
+  .form-msg.err{color:var(--anomaly);} .form-msg.hint{color:var(--muted);}
+
+  /* ---------- panels ---------- */
+  .panel{background:linear-gradient(180deg,#0a1625,#08111d); border:1px solid var(--border); border-radius:12px; padding:16px 18px;}
+  .panel-head{display:flex; align-items:flex-start; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:6px;}
+  .panel-title{display:flex; align-items:center; gap:10px; margin:0; font-size:14px; font-weight:600;}
+  .panel-title .ico{color:var(--muted);}
+  .panel-sub{color:var(--dim); font-size:11.5px; margin:2px 0 0 28px;}
+  .pill{display:inline-flex; align-items:center; gap:6px; font-size:11.5px; color:var(--muted);}
+  .pill .dot{width:7px; height:7px; border-radius:50%; background:var(--up);}
+
+  /* status row */
+  .status-panel{margin-bottom:16px;}
+  .status-head{display:flex; align-items:center; gap:12px; margin-bottom:14px;}
+  .status-head .big-dot{width:11px; height:11px; border-radius:50%; background:var(--up); box-shadow:0 0 10px var(--up);}
+  .status-head .big-dot.off{background:var(--dim); box-shadow:none;}
+  .status-head h2{margin:0; font-size:15px; font-weight:600;}
+  .stats{display:grid; grid-template-columns:repeat(5,1fr); gap:12px;}
+  @media(max-width:1100px){.stats{grid-template-columns:repeat(2,1fr);}}
+  .stat{display:flex; align-items:center; gap:14px; padding:14px 16px; border-radius:10px; border:1px solid var(--border); background:var(--panel2); position:relative;}
+  .stat .badge{width:44px; height:44px; border-radius:50%; display:flex; align-items:center; justify-content:center; flex-shrink:0; background:rgba(30,155,255,.12); color:var(--accent);}
+  .stat .lbl{font-size:11.5px; color:var(--muted);}
+  .stat .val{font-size:22px; font-weight:700; line-height:1.15;}
+  .stat .sub{font-size:11px; color:var(--dim);}
+  .stat .corner{position:absolute; top:10px; right:12px; color:var(--dim);}
+  .stat.ok{border-color:rgba(25,211,168,.55); background:linear-gradient(180deg,rgba(25,211,168,.08),var(--panel2));}
+  .stat.ok .badge{background:rgba(25,211,168,.14); color:var(--up);} .stat.ok .corner{color:var(--up);}
+  .stat.bad{border-color:rgba(255,77,94,.6); background:linear-gradient(180deg,rgba(255,77,94,.09),var(--panel2));}
+  .stat.bad .badge{background:rgba(255,77,94,.14); color:var(--anomaly);} .stat.bad .corner{color:var(--anomaly);}
+  .stat.off .val{color:var(--muted);}
+
+  .anomaly-banner{
+    background:rgba(255,77,94,.10); border:1px solid rgba(255,77,94,.6); color:#ff8794;
+    border-radius:8px; padding:9px 14px; margin-bottom:16px; font-size:12.5px; font-family:var(--mono);
+    display:flex; align-items:center; gap:10px;
+  }
+  .anomaly-banner .dot{width:8px; height:8px; border-radius:50%; background:var(--anomaly); flex-shrink:0;}
+
+  .main-grid{display:grid; grid-template-columns:1.5fr 1fr 1.15fr; gap:16px; margin-bottom:16px; align-items:stretch;}
+  .metrics-side{display:grid; grid-template-columns:1fr 1fr; grid-auto-rows:1fr; gap:14px; min-width:0;}
+  .metrics-side .mcard{min-width:0;}
+  @media(max-width:1500px){
+    .main-grid{grid-template-columns:1.55fr 1fr;}
+    .metrics-side{grid-column:1 / -1; grid-template-columns:repeat(4,1fr);}
+  }
+  @media(max-width:1200px){.metrics-side{grid-template-columns:repeat(2,1fr);}}
+  @media(max-width:1000px){.main-grid{grid-template-columns:1fr;}}
+  @media(max-width:700px){.metrics-side{grid-template-columns:1fr;}}
+
+  /* topology */
+  .legend{display:flex; align-items:center; gap:14px; font-size:11px; color:var(--muted); flex-wrap:wrap; padding-top:4px;}
+  .legend .lg{display:inline-flex; align-items:center; gap:6px;}
+  .legend .sw{width:9px; height:9px; border-radius:50%;}
+  .legend .ln{width:22px; height:0; border-top:2.5px solid var(--cyan);}
+  .legend .ln.dash{border-top:1.5px dashed #3a6285;}
+  svg.topo{width:100%; height:auto; max-height:460px;}
+  .path-strip{margin-top:10px; border:1px solid var(--border); border-radius:10px; background:var(--panel2); padding:6px 14px;}
+  .path-row{display:grid; grid-template-columns:2.6fr 0.7fr 1fr 1.2fr; gap:14px; align-items:center; padding:8px 0; border-bottom:1px solid var(--border);}
+  .path-row:last-child{border-bottom:none;}
+  @media(max-width:900px){.path-row{grid-template-columns:1fr 1fr;}}
+  .pr-lbl{font-size:10.5px; color:var(--dim); margin-bottom:5px; display:flex; align-items:center; gap:6px;}
+  .pr-val{font-size:13px; font-family:var(--mono);}
+  .pr-sub{font-size:11px; font-family:var(--mono); color:var(--dim); margin-top:3px; line-height:1.4;}
+  .chips{display:flex; align-items:center; flex-wrap:wrap; gap:4px;}
+  .chip{display:inline-flex; align-items:center; justify-content:center; min-width:22px; height:22px; padding:0 7px; border-radius:11px; font-size:11px; font-family:var(--mono); border:1px solid var(--border2); background:#0a1d30; color:var(--fg);}
+  .chip.host{border-radius:6px;}
+  .chip-arrow{color:var(--dim); font-size:11px;}
+  .empty{color:var(--dim); font-size:12.5px; padding:22px 0; text-align:center;}
+  .throughput-wrap{margin-top:12px;}
+  .throughput-wrap h3{font-size:11px; color:var(--muted); margin:0 0 4px; font-weight:600;}
+  .throughput svg{width:100%; height:56px;}
+
+  /* event stream */
+  .stream{display:flex; flex-direction:column; min-height:0;}
+  .stream-head{display:grid; grid-template-columns:64px 88px 1fr 54px; gap:10px; font-size:11px; color:var(--dim); padding:8px 6px 6px; border-bottom:1px solid var(--border);}
+  .stream-body{overflow-y:auto; max-height:640px; flex:1;}
+  .ev{display:grid; grid-template-columns:64px 88px 1fr 54px; gap:10px; align-items:center; padding:8px 6px; border-bottom:1px solid rgba(19,48,73,.6); font-size:12px;}
+  .ev .t{color:var(--muted); font-family:var(--mono); font-size:11.5px;}
+  .ev .msg{color:var(--fg); font-family:var(--mono); font-size:11.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .tag{display:inline-block; font-size:10px; font-weight:700; letter-spacing:.05em; padding:3px 9px; border-radius:5px; text-align:center;}
+  .tag.decision{background:rgba(30,155,255,.16); color:#4db0ff;}
+  .tag.anomaly{background:rgba(255,77,94,.18); color:#ff6b79;}
+  .tag.cleared{background:rgba(25,211,168,.15); color:var(--up);}
+  .tag.link{background:rgba(240,169,59,.15); color:var(--down);}
+  .tag.evict{background:rgba(127,149,171,.15); color:#9db3c8;}
+  .sev{font-size:10px; font-weight:700; padding:3px 0; border-radius:5px; text-align:center;}
+  .sev.info{background:rgba(30,155,255,.14); color:#4db0ff;} .sev.high{background:rgba(255,77,94,.18); color:#ff6b79;}
+
+  /* metrics */
+  .metrics{display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:16px;}
+  @media(max-width:1200px){.metrics{grid-template-columns:repeat(2,1fr);}}
+  @media(max-width:700px){.metrics{grid-template-columns:1fr;}}
+  .mcard{background:linear-gradient(180deg,#0a1625,#08111d); border:1px solid var(--border); border-radius:12px; padding:14px 16px; min-height:190px; display:flex; flex-direction:column;}
+  .mcard-head{display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:10px;}
+  .mcard-head h3{margin:0; font-size:12.5px; font-weight:600; display:flex; align-items:center; gap:8px;}
+  .mcard-head h3 .ico{color:var(--accent);} .mcard-head h3 small{color:var(--dim); font-weight:400; font-size:11px;}
+  .mcard-head .meta{font-size:11px; color:var(--muted); white-space:nowrap;}
+  .mcard-head .meta b{color:var(--fg); font-weight:600;}
+  .bar-list{display:flex; flex-direction:column; gap:11px; margin-top:4px;}
+  .bar-row{display:flex; align-items:center; gap:10px; font-size:11.5px;}
+  .bar-lbl{font-family:var(--mono); color:var(--muted); width:54px; flex-shrink:0; font-size:11.5px;}
+  .bar-track{flex:1; height:11px; background:#0d2033; border-radius:6px; overflow:hidden;}
+  .bar-fill{height:100%; border-radius:6px;}
+  .bar-val{font-family:var(--mono); color:var(--fg); width:44px; text-align:right; flex-shrink:0; font-size:11.5px;}
+  .donut-wrap{display:flex; align-items:center; gap:14px; flex:1;}
+  .donut{position:relative; width:112px; height:112px; flex-shrink:0;}
+  .donut .center{position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center;}
+  .donut .center b{font-size:22px; line-height:1;} .donut .center span{font-size:10px; color:var(--muted);}
+  .dleg{flex:1; display:flex; flex-direction:column; gap:9px; min-width:0;}
+  .dleg-row{display:flex; align-items:center; gap:7px; font-size:11px;}
+  .dleg-row .d{width:8px; height:8px; border-radius:50%; flex-shrink:0;}
+  .dleg-row .n{font-family:var(--mono); color:var(--muted); width:50px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex-shrink:0;}
+  .dleg-row .tr{flex:1; height:6px; background:#0d2033; border-radius:3px; overflow:hidden;}
+  .dleg-row .tr i{display:block; height:100%; border-radius:3px;}
+  .dleg-row .p{font-family:var(--mono); width:40px; text-align:right; color:var(--fg);}
+
+  /* timeline bar */
+  .timeline{display:flex; align-items:center; gap:14px; padding:12px 18px; flex-wrap:wrap;}
+  .play{width:42px; height:42px; border-radius:50%; padding:0; display:flex; align-items:center; justify-content:center; background:var(--accent); border-color:var(--accent); color:#fff; box-shadow:0 0 16px rgba(30,155,255,.4); flex-shrink:0;}
+  .play:disabled{box-shadow:none; background:#12304a; border-color:#12304a;}
+  .timeline select{padding:7px 10px;}
+  .scrub{flex:1; min-width:180px; -webkit-appearance:none; appearance:none; height:5px; border-radius:3px; outline:none; border:none; padding:0; cursor:pointer;}
+  .scrub::-webkit-slider-thumb{-webkit-appearance:none; width:14px; height:14px; border-radius:50%; background:var(--accent); box-shadow:0 0 10px var(--accent); border:none;}
+  .scrub::-moz-range-thumb{width:14px; height:14px; border-radius:50%; background:var(--accent); border:none;}
+  .scrub:disabled{opacity:.6;}
+  .tl-meta{font-size:12px; color:var(--muted); font-family:var(--mono); white-space:nowrap;}
+  .flow-chips{display:flex; align-items:center; gap:14px; flex-wrap:wrap;}
+  .flow-item{display:inline-flex; align-items:center; gap:6px; font-size:12px; font-family:var(--mono); color:var(--muted);}
+  .flow-item b{color:var(--fg); font-weight:600;}
+  .flow-dot{width:8px; height:8px; border-radius:50%; flex-shrink:0;}
+
+  .loadmsg{color:var(--muted); padding:44px; text-align:center; font-size:13px; line-height:1.7;}
+  .loadmsg code{font-family:var(--mono); color:var(--cyan);}
+
+  /* ---------- tabs, compare, results ---------- */
+  .tabs{display:flex; gap:6px; padding:12px 0 0;}
+  .tab{background:transparent; border:1px solid transparent; color:var(--muted); font-weight:600; padding:8px 18px; border-radius:8px;}
+  .tab:hover{border-color:var(--border2); color:var(--fg);}
+  .tab.on{background:rgba(30,155,255,.14); border-color:var(--accent); color:var(--fg);}
+  .cmp-wrap, .res-wrap{padding:16px 0 8px; display:flex; flex-direction:column; gap:16px;}
+  .cmp-text{color:var(--muted); font-size:13px; line-height:1.55; max-width:980px; margin:8px 0 14px;}
+  .cmp-choices{display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:10px; margin-bottom:14px;}
+  .cmp-choice{display:flex; align-items:flex-start; gap:10px; padding:10px 12px; border:1px solid var(--border); border-radius:10px; background:var(--panel2); cursor:pointer;}
+  .cmp-choice.on{border-color:var(--accent); background:rgba(30,155,255,.08);}
+  .cmp-choice input{margin-top:3px;}
+  .cmp-choice b{display:block; font-size:13px; font-weight:600;}
+  .cmp-choice small{display:block; color:var(--dim); font-size:11.5px; margin-top:2px;}
+  .cmp-actions{display:flex; align-items:center; gap:14px; flex-wrap:wrap;}
+  .cmp-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:14px;}
+  .cmp-card{border:1px solid var(--border); border-radius:12px; background:linear-gradient(180deg,#0a1625,#08111d); padding:14px 16px;}
+  .cmp-card.active{border-color:var(--accent); box-shadow:0 0 18px rgba(30,155,255,.25);}
+  .cmp-name{font-size:13px; font-weight:600; margin-bottom:8px;}
+  .cmp-wait{color:var(--dim); padding:60px 0; text-align:center;}
+  .cmp-big{font-size:30px; font-weight:700; line-height:1.1;}
+  .cmp-big small{font-size:12px; font-weight:500; color:var(--muted);}
+  .cmp-big.good{color:var(--up);} .cmp-big.mid{color:var(--down);} .cmp-big.bad{color:var(--anomaly);}
+  .cmp-track{height:8px; border-radius:4px; background:#12304a; margin:10px 0 6px; overflow:hidden;}
+  .cmp-fill{height:100%; border-radius:4px; background:var(--accent);}
+  .cmp-fill.good{background:var(--up);} .cmp-fill.mid{background:var(--down);} .cmp-fill.bad{background:var(--anomaly);}
+  .cmp-sub{font-size:11.5px; color:var(--dim); margin-bottom:8px;}
+  .heat-topo{width:100%; height:auto; margin:4px 0;}
+  .cmp-stats{display:flex; justify-content:space-between; gap:8px; flex-wrap:wrap; font-size:11.5px; color:var(--muted);}
+  .cmp-stats b{color:var(--fg);} .cmp-stats b.hot{color:var(--anomaly);}
+  .cmp-legend{font-size:11.5px; color:var(--dim);}
+  .cmp-verdict{font-size:13.5px; line-height:1.6;}
+  .res-hero{display:grid; grid-template-columns:repeat(4,1fr); gap:12px;}
+  @media(max-width:1000px){.res-hero{grid-template-columns:repeat(2,1fr);}}
+  @media(max-width:600px){.res-hero{grid-template-columns:1fr;}}
+  .res-stat{border:1px solid rgba(25,211,168,.5); background:linear-gradient(180deg,rgba(25,211,168,.07),var(--panel2)); border-radius:12px; padding:16px;}
+  .res-stat.bad{border-color:rgba(255,77,94,.55); background:linear-gradient(180deg,rgba(255,77,94,.08),var(--panel2));}
+  .res-stat .num{font-size:26px; font-weight:700; color:var(--up);} .res-stat.bad .num{color:var(--anomaly);}
+  .res-stat .lbl{font-size:12px; color:var(--muted); margin-top:4px; line-height:1.45;}
+  .ev-chart{display:flex; flex-direction:column; gap:7px; max-width:980px;}
+  .ev-row{display:grid; grid-template-columns:minmax(150px,230px) 1fr 64px; gap:12px; align-items:center; font-size:12.5px;}
+  .ev-nm{color:var(--fg);}
+  .ev-track{position:relative; height:14px; border-radius:4px; background:#12304a;}
+  .ev-fill{height:100%; border-radius:4px; background:#6f8aa3;}
+  .ev-fill.good{background:var(--up);} .ev-fill.bad{background:var(--anomaly);}
+  .ev-ci{position:absolute; top:5px; height:4px; background:rgba(255,255,255,.85); border-radius:2px;}
+  .ev-v{font-family:var(--mono); text-align:right;}
+  .res-note{color:var(--muted); font-size:12.5px; line-height:1.55; max-width:980px; margin:14px 0 0;}
+  .res-two{display:grid; grid-template-columns:1fr 1fr; gap:16px;}
+  @media(max-width:900px){.res-two{grid-template-columns:1fr;}}
+  .res-list{margin:10px 0 0; padding-left:18px; color:var(--muted); line-height:1.65; font-size:13px;}
+  .res-list b{color:var(--fg);}
+  .res-foot{color:var(--dim); font-size:11.5px; padding-bottom:20px;}
+  .gr-panel{display:flex; flex-direction:column; gap:10px;}
+  .gr-svg{width:100%; height:auto; display:block;}
+  .gr-svg text{fill:var(--muted); font-size:11px;}
+  .gr-svg .ax{stroke:#1d3b57; stroke-width:1;}
+  .gr-svg .gl{stroke:#12304a; stroke-width:1;}
+  .gr-legend{display:flex; flex-wrap:wrap; gap:6px 16px; font-size:12px; color:var(--muted);}
+  .gr-legend i{display:inline-block; width:14px; height:3px; border-radius:2px; margin-right:6px; vertical-align:middle;}
+  .gr-multi{display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:14px;}
+  .gr-mini{border:1px solid var(--border); border-radius:10px; padding:10px 12px; background:var(--panel2);}
+  .gr-mini h3{margin:0 0 4px; font-size:12.5px; font-weight:600;}
+  .gr-mini .jn{font-size:11.5px; color:var(--muted); margin-top:4px;}
+  .gr-mini .jn b{color:var(--fg); font-size:13px;}
+  .gr-mini .jn b.good{color:var(--up);} .gr-mini .jn b.bad{color:var(--anomaly);} .gr-mini .jn b.mid{color:var(--down);}
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.24.7/babel.min.js"></script>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useMemo, useRef, useCallback } = React;
+
+const API = "http://localhost:8000";
+
+// Fit the UI to the window: on very wide viewports (or a zoomed-out browser)
+// scale everything up so the layout is laid out at ~1700 CSS px wide instead
+// of leaving tiny content in a huge empty page.
+(function fitToWindow() {
+  const root = document.getElementById("root");
+  const fit = () => {
+    const w = window.innerWidth;
+    root.style.zoom = w <= 1800 ? 1 : Math.min(2.4, w / 1700);
+  };
+  fit();
+  window.addEventListener("resize", fit);
+})();
+
+// ---------------------------------------------------------------- helpers
+const fmtClock = (ts) => new Date(ts * 1000).toLocaleTimeString("en-GB");
+const fmtDur = (sec) => {
+  sec = Math.max(0, Math.round(sec));
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  const p = (n) => String(n).padStart(2, "0");
+  return h > 0 ? `${p(h)}:${p(m)}:${p(s)}` : `${p(m)}:${p(s)}`;
+};
+const fmtMs = (v) => (v >= 1 ? v.toFixed(1) : v.toFixed(2));
+const hostName = (ip) => "h" + String(ip).split(".")[3];
+const linkKeyOf = (a, b) => (a < b ? `${a}-${b}` : `${b}-${a}`);
+
+const ICONS = {
+  net: <React.Fragment><circle cx="12" cy="5" r="2.2"/><circle cx="5" cy="18" r="2.2"/><circle cx="19" cy="18" r="2.2"/><path d="M12 7.2 6 16M12 7.2 18 16M7.2 18h9.6"/></React.Fragment>,
+  flows: <path d="M4 7h13l-3-3M20 17H7l3 3"/>,
+  dec: <React.Fragment><circle cx="6" cy="6" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="12" cy="18" r="2"/><path d="M7.5 7.5 11 16M16.5 7.5 13 16"/></React.Fragment>,
+  alert: <React.Fragment><path d="M12 3 2.5 20h19L12 3z"/><path d="M12 10v4M12 17v.5"/></React.Fragment>,
+  link: <path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>,
+  clock: <React.Fragment><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></React.Fragment>,
+  chart: <path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/>,
+  pie: <React.Fragment><circle cx="12" cy="12" r="9"/><path d="M12 3v9h9"/></React.Fragment>,
+  filter: <path d="M3 5h18l-7 8v6l-4-2v-4L3 5z"/>,
+  check: <path d="M5 12.5l4.5 4.5L19 7.5"/>,
+  copy: <React.Fragment><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></React.Fragment>,
+  shield: <path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6l8-3z"/>,
+  play: <path d="M7 4l13 8-13 8z" fill="currentColor"/>,
+  pause: <path d="M7 4h4v16H7zM13 4h4v16h-4z" fill="currentColor"/>,
+  topo: <React.Fragment><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4M5 5l3 3M16 16l3 3M19 5l-3 3M8 16l-3 3"/></React.Fragment>,
+  list: <path d="M4 6h16M4 12h16M4 18h10"/>,
+};
+function Icon({ name, size = 18 }) {
+  return (
+    <svg className="ico" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">{ICONS[name]}</svg>
+  );
+}
+
+// ---------------------------------------------------------------- data hooks
+function useRuns() {
+  const [runs, setRuns] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const refresh = useCallback(() => {
+    setLoading(true);
+    fetch(`${API}/api/runs`)
+      .then(r => { if (!r.ok) throw new Error("API not reachable"); return r.json(); })
+      .then(data => { setRuns(data); setError(null); })
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false));
+  }, []);
+  useEffect(refresh, [refresh]);
+  return { runs, loading, error, refresh };
+}
+
+function useRunData(runId) {
+  const [events, setEvents] = useState([]);
+  const [stats, setStats] = useState([]);
+  const [loading, setLoading] = useState(false);
+  useEffect(() => {
+    if (runId == null) return;
+    setLoading(true);
+    Promise.all([
+      fetch(`${API}/api/runs/${runId}/events`).then(r => r.json()),
+      fetch(`${API}/api/runs/${runId}/stats`).then(r => r.json()),
+    ]).then(([ev, st]) => {
+      setEvents(ev);
+      setStats(st);
+    }).finally(() => setLoading(false));
+  }, [runId]);
+  return { events, stats, loading };
+}
+
+function useLiveMode(onLiveRunChange) {
+  const [isLive, setIsLive] = useState(false);
+  const [liveRunId, setLiveRunId] = useState(null);
+  const pollRef = useRef(null);
+
+  useEffect(() => {
+    pollRef.current = setInterval(() => {
+      fetch(`${API}/api/live/current`)
+        .then(r => r.json())
+        .then(data => {
+          setIsLive(data.is_live);
+          setLiveRunId(prev => {
+            if (data.run_id !== prev) {
+              onLiveRunChange(data.run_id);
+              return data.run_id;
+            }
+            return prev;
+          });
+        })
+        .catch(() => setIsLive(false));
+    }, 1500);
+    return () => clearInterval(pollRef.current);
+  }, [onLiveRunChange]);
+
+  return { isLive, liveRunId };
+}
+
+const postJSON = (path, body) =>
+  fetch(`${API}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body || {}),
+  }).then(r => r.json().then(data => ({ ok: r.ok, data })));
+
+// Lab daemon status, polled. Lives in App so the status cards, the Stop
+// button and the Run form all read the same value.
+function useLabStatus() {
+  const [status, setStatus] = useState(null);
+  const [statusError, setStatusError] = useState(null);
+  const refreshStatus = useCallback(() => {
+    return fetch(`${API}/api/lab/status`)
+      .then(r => r.json().then(data => ({ ok: r.ok, data })))
+      .then(({ ok, data }) => {
+        if (ok) { setStatus(data); setStatusError(null); return data; }
+        setStatusError(data.detail || "Lab daemon error");
+        return null;
+      })
+      .catch(() => { setStatusError(`Can't reach the API at ${API}`); return null; });
+  }, []);
+  useEffect(() => {
+    refreshStatus();
+    const id = setInterval(refreshStatus, 2500);
+    return () => clearInterval(id);
+  }, [refreshStatus]);
+  return { status, statusError, refreshStatus };
+}
+
+// ---------------------------------------------------------------- topology constants
+// Fixed fat-tree from topology.py's ADJACENCY / HOST_LOCATION: 2 core (5,6),
+// two pods each with 2 aggregation (1,2 / 3,4) and 2 edge (7,8 / 9,10)
+// switches, 2 hosts per edge switch. Laid out by tier so the full topology is
+// always visible, including links no test happened to use.
+const SWITCH_TIER = { 5: "core", 6: "core", 1: "agg", 2: "agg", 3: "agg", 4: "agg",
+                       7: "edge", 8: "edge", 9: "edge", 10: "edge" };
+const TIER_COLOR = { core: "#5cc4ff", agg: "#3a86ff", edge: "#19d3a8" };
+const STATIC_EDGES = [
+  [5, 1], [5, 2], [5, 3], [5, 4], [6, 1], [6, 2], [6, 3], [6, 4],
+  [1, 7], [1, 8], [2, 7], [2, 8], [3, 9], [3, 10], [4, 9], [4, 10],
+];
+const HOSTS = [
+  { id: "10.0.0.1", edge: 7 }, { id: "10.0.0.2", edge: 7 },
+  { id: "10.0.0.3", edge: 8 }, { id: "10.0.0.4", edge: 8 },
+  { id: "10.0.0.5", edge: 9 }, { id: "10.0.0.6", edge: 9 },
+  { id: "10.0.0.7", edge: 10 }, { id: "10.0.0.8", edge: 10 },
+];
+const SWITCH_POS = {
+  5: { x: 260, y: 46 },  6: { x: 520, y: 46 },
+  1: { x: 170, y: 140 }, 2: { x: 330, y: 140 }, 3: { x: 450, y: 140 }, 4: { x: 610, y: 140 },
+  7: { x: 170, y: 234 }, 8: { x: 330, y: 234 }, 9: { x: 450, y: 234 }, 10: { x: 610, y: 234 },
+};
+const HOST_POS = {
+  "10.0.0.1": { x: 138, y: 322 }, "10.0.0.2": { x: 202, y: 322 },
+  "10.0.0.3": { x: 298, y: 322 }, "10.0.0.4": { x: 362, y: 322 },
+  "10.0.0.5": { x: 418, y: 322 }, "10.0.0.6": { x: 482, y: 322 },
+  "10.0.0.7": { x: 578, y: 322 }, "10.0.0.8": { x: 642, y: 322 },
+};
+
+function buildGraph() {
+  const nodeList = Object.keys(SWITCH_POS).map(Number);
+  const edges = STATIC_EDGES.map(([a, b]) => ({ a, b }));
+  return { nodeList, pos: SWITCH_POS, edges, hosts: HOSTS, hostPos: HOST_POS };
+}
+
+// As of currentTime: which links are down (physical) or anomalous.
+function computeStateAt(events, currentTime) {
+  const linkAnomaly = {};
+  const linkDown = {};
+  for (const e of events) {
+    if (e.ts > currentTime) break;
+    const key = e.switch_a != null ? linkKeyOf(e.switch_a, e.switch_b) : null;
+    if (e.type === "anomaly" && key) linkAnomaly[key] = e.status === "detected";
+    if (e.type === "link_status" && key) linkDown[key] = e.status === "down";
+  }
+  return { linkAnomaly, linkDown };
+}
+
+// ---------------------------------------------------------------- flows
+const ALGORITHMS = ["round_robin", "least_congested", "lcp_pending", "least_congested_qos", "q_learning", "shortest_path", "random_path", "global_rr"];
+const ALL_HOSTS = ["h1", "h2", "h3", "h4", "h5", "h6", "h7", "h8"];
+// From topology.py's HOST_LOCATION: which edge switch each host sits behind.
+const EDGE_OF_HOST = { h1: 7, h2: 7, h3: 8, h4: 8, h5: 9, h6: 9, h7: 10, h8: 10 };
+const DEFAULT_RUN_DURATION = 8; // seconds -- fixed, not exposed, to keep the Run form to 4 fields
+// The daemon keeps a finished test registered for duration+2s before
+// reaping it (and refusing a same-pair rerun / algorithm change until
+// then), so the UI treats a flow as occupying its slot for that long.
+const FLOW_SLOT_MS = DEFAULT_RUN_DURATION * 1000 + 2500;
+const isOccupying = (f, now) => now < f.startedAt + FLOW_SLOT_MS;
+
+// A flow is {id, src:"h1", dst:"h5", color, startedAt, endsAt}.
+const ipOf = (h) => "10.0.0." + h.slice(1);
+const FLOW_COLORS = ["#22d3ee", "#a78bfa", "#f472b6", "#a3e635"];
+// Matches by entry/exit switch pair (verified behaviour); when the event
+// also carries src_ip / a parsable destination, those must agree too, so
+// two flows sharing a switch pair (h1->h5 and h2->h6) stay separate.
+function eventMatchesFlow(e, f) {
+  if (e.src !== EDGE_OF_HOST[f.src] || e.dst_switch !== EDGE_OF_HOST[f.dst]) return false;
+  if (e.src_ip && e.src_ip !== ipOf(f.src)) return false;
+  const dstIp = e.flow ? String(e.flow).split(":")[0] : null;
+  if (dstIp && /^\d+\.\d+\.\d+\.\d+$/.test(dstIp) && dstIp !== ipOf(f.dst)) return false;
+  return true;
+}
+
+// ---------------------------------------------------------------- top bar: run form
+function RunForm({ status, statusError, refreshStatus, flows, onRunStarted }) {
+  const [busy, setBusy] = useState(false);
+  const [busyLabel, setBusyLabel] = useState("");
+  const [error, setError] = useState(null);
+  const [algorithm, setAlgorithm] = useState("least_congested");
+  const [src, setSrc] = useState("h1");
+  const [dst, setDst] = useState("h5");
+  const [bandwidth, setBandwidth] = useState("3M");
+  const [protocol, setProtocol] = useState("udp");
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 500);
+    return () => clearInterval(id);
+  }, []);
+
+  // One button: ensures the topology is up, ensures the right algorithm
+  // is active (restarting the controller only if it's actually
+  // different), sends the traffic, then hands control back to App.
+  const runExperiment = async () => {
+    if (src === dst) { setError("Source and destination must differ."); return; }
+    setBusy(true);
+    setError(null);
+    try {
+      let current = status;
+      if (!current?.topology_up) {
+        setBusyLabel("Starting topology…");
+        const r = await postJSON("/api/lab/start");
+        if (!r.ok || r.data.error) throw new Error(r.data.error || r.data.detail || "Failed to start topology");
+        current = await refreshStatus();
+      }
+      if (current?.algorithm !== algorithm) {
+        setBusyLabel(`Switching to ${algorithm}…`);
+        const r = await postJSON("/api/lab/algorithm", { algorithm });
+        if (!r.ok || r.data.error) throw new Error(r.data.error || r.data.detail || "Failed to set algorithm");
+      }
+      setBusyLabel("Sending traffic…");
+      const tr = await postJSON("/api/lab/traffic", {
+        src, dst, protocol, duration: DEFAULT_RUN_DURATION,
+        bandwidth: protocol === "udp" ? bandwidth : undefined,
+      });
+      if (!tr.ok || tr.data.error) throw new Error(tr.data.error || tr.data.detail || "Failed to start traffic");
+
+      refreshStatus();
+      onRunStarted && onRunStarted({ src, dst });
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+      setBusyLabel("");
+    }
+  };
+
+  const topoUp = status?.topology_up;
+  // Flows still occupying a slot. If the topology is down, nothing is running.
+  const running = topoUp ? flows.filter(f => isOccupying(f, now)) : [];
+  const samePairRunning = running.some(f =>
+    (f.src === src && f.dst === dst) || (f.src === dst && f.dst === src));
+  const algoConflict = running.length > 0 && !!status?.algorithm && status.algorithm !== algorithm;
+  const blockReason = samePairRunning
+    ? `${src} ↔ ${dst} is already running`
+    : algoConflict
+      ? `${status.algorithm} is running — wait for it to finish to switch algorithm`
+      : null;
+  const msg = error || statusError;
+
+  return (
+    <div className="runform-wrap">
+      <div className="runform">
+        <div className="rf-field">
+          <span className="rf-label">Algorithm</span>
+          <select value={algorithm} onChange={e => setAlgorithm(e.target.value)} disabled={busy}>
+            {ALGORITHMS.map(a => <option key={a} value={a}>{a}</option>)}
+          </select>
+        </div>
+        <div className="rf-field">
+          <span className="rf-label">From</span>
+          <select value={src} onChange={e => setSrc(e.target.value)} disabled={busy}>
+            {ALL_HOSTS.map(h => <option key={h} value={h}>{h}</option>)}
+          </select>
+        </div>
+        <span className="rf-arrow">→</span>
+        <div className="rf-field">
+          <span className="rf-label">To</span>
+          <select value={dst} onChange={e => setDst(e.target.value)} disabled={busy}>
+            {ALL_HOSTS.map(h => <option key={h} value={h}>{h}</option>)}
+          </select>
+        </div>
+        <div className="rf-field">
+          <span className="rf-label">Protocol</span>
+          <select value={protocol} onChange={e => setProtocol(e.target.value)} disabled={busy}>
+            <option value="udp">UDP</option>
+            <option value="tcp">TCP</option>
+          </select>
+        </div>
+        <div className="rf-field">
+          <span className="rf-label">Max bandwidth</span>
+          <input type="text" value={protocol === "udp" ? bandwidth : ""} onChange={e => setBandwidth(e.target.value)}
+            disabled={busy || protocol === "tcp"} placeholder={protocol === "tcp" ? "capped 5M" : "e.g. 3M"} style={{ width: "86px" }} />
+        </div>
+        <button className="run" disabled={busy || src === dst || !!blockReason} onClick={runExperiment}>
+          <Icon name="play" size={13} />{busy ? (busyLabel || "Working…") : "Run"}
+        </button>
+      </div>
+      {msg ? <div className="form-msg err">{msg}</div>
+           : blockReason ? <div className="form-msg hint">{blockReason}</div> : null}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- status cards
+function StatCard({ icon, label, value, sub, tone, corner }) {
+  return (
+    <div className={`stat ${tone || ""}`}>
+      <div className="badge"><Icon name={icon} size={20} /></div>
+      <div>
+        <div className="lbl">{label}</div>
+        <div className="val">{value}</div>
+        <div className="sub">{sub}</div>
+      </div>
+      {corner && <span className="corner"><Icon name={corner} size={16} /></span>}
+    </div>
+  );
+}
+
+// Own 500ms tick so the whole dashboard doesn't re-render for a clock.
+function ActiveFlowsCard({ flows, topoUp }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 500);
+    return () => clearInterval(id);
+  }, []);
+  const running = topoUp ? flows.filter(f => now < f.endsAt).length : 0;
+  return (
+    <StatCard icon="flows" label="Active flows" value={running}
+      sub={flows.length ? `of ${flows.length} in this batch` : "none started"} corner="chart" />
+  );
+}
+
+function FlowChips({ flows }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 500);
+    return () => clearInterval(id);
+  }, []);
+  return (
+    <div className="flow-chips">
+      {flows.map(f => {
+        const left = Math.max(0, Math.ceil((f.endsAt - now) / 1000));
+        return (
+          <span className="flow-item" key={f.id}>
+            <span className="flow-dot" style={{ background: f.color }}></span>
+            <b>{f.src} → {f.dst}</b>
+            <span>{left > 0 ? `${left}s` : "done"}</span>
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+function AnomalyBanner({ events, currentTime }) {
+  const { linkAnomaly } = useMemo(() => computeStateAt(events, currentTime), [events, currentTime]);
+  const active = Object.entries(linkAnomaly).filter(([, v]) => v).map(([k]) => k);
+  if (active.length === 0) return null;
+  return (
+    <div className="anomaly-banner">
+      <span className="dot"></span>
+      ANOMALY ACTIVE — link{active.length > 1 ? "s" : ""} {active.map(k => k.replace("-", " ↔ ")).join(", ")} excluded from routing
+    </div>
+  );
+}
+
+// What the algorithm based its last decision on (sent by the controller as
+// `algo_info`). Different per algorithm; missing on events from older runs.
+function algoInfoText(i) {
+  if (i.epsilon != null) {   // q_learning
+    return `ε ${i.epsilon.toFixed(2)} · explored ${i.explored_hops}/${i.hops} hops · Q-table ${i.q_table_size}`;
+  }
+  const parts = [];
+  if (i.candidates != null) parts.push(`${i.candidates} candidate paths`);
+  if (i.turn != null) parts.push(`turn ${i.turn}`);
+  if (i.bottleneck_Bps != null) parts.push(`busiest link ${(i.bottleneck_Bps * 8 / 1e6).toFixed(2)} Mbps`);
+  if (i.reason) parts.push(i.reason);
+  return parts.join(" · ");
+}
+
+// ---------------------------------------------------------------- topology
+function Topology({ graph, events, currentTime, flows, algorithm }) {
+  const { nodeList, pos, edges, hosts, hostPos } = graph;
+  const { linkAnomaly, linkDown } = useMemo(
+    () => computeStateAt(events, currentTime), [events, currentTime]
+  );
+
+  // One "track" per focused flow (its own color + latest decision). With no
+  // focused flows there is a single track = the latest decision overall.
+  const tracks = useMemo(() => {
+    const lastBefore = (pred) => {
+      let last = null;
+      for (const e of events) {
+        if (e.ts > currentTime) break;
+        if (e.type === "decision" && pred(e)) last = e;
+      }
+      return last;
+    };
+    if (!flows || flows.length === 0) {
+      const d = lastBefore(() => true);
+      return [{
+        color: "#22d3ee", label: null, decision: d,
+        srcIp: d ? (d.src_ip || null) : null,
+        dstIp: d && d.flow ? d.flow.split(":")[0] : null,
+      }];
+    }
+    return flows.map(f => ({
+      color: f.color, label: `${f.src} → ${f.dst}`,
+      decision: lastBefore(e => eventMatchesFlow(e, f)),
+      srcIp: ipOf(f.src), dstIp: ipOf(f.dst),
+    }));
+  }, [events, currentTime, flows]);
+
+  const trackEdges = tracks.map(t => {
+    const s = new Set();
+    const p = t.decision && Array.isArray(t.decision.path) ? t.decision.path : [];
+    for (let i = 0; i < p.length - 1; i++) s.add(linkKeyOf(p[i], p[i + 1]));
+    return s;
+  });
+
+  const tierCount = (t) => nodeList.filter(n => SWITCH_TIER[n] === t).length;
+
+  return (
+    <React.Fragment>
+    <svg className="topo" viewBox="0 0 700 360">
+      <defs>
+        <filter id="glow" filterUnits="userSpaceOnUse" x="0" y="0" width="700" height="360">
+          <feGaussianBlur stdDeviation="2.6" result="b" />
+          <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
+        </filter>
+      </defs>
+
+      {/* tier labels */}
+      {[["Core", "core", 46], ["Aggregation", "agg", 140], ["Edge", "edge", 234]].map(([name, t, y]) => (
+        <g key={t}>
+          <text x="6" y={y - 3} fontSize="12" fontWeight="600" fill="var(--fg)">{name}</text>
+          <text x="6" y={y + 11} fontSize="10" fill="var(--dim)">({tierCount(t)} switches)</text>
+        </g>
+      ))}
+      <text x="6" y="318" fontSize="12" fontWeight="600" fill="var(--fg)">Hosts</text>
+      <text x="6" y="332" fontSize="10" fill="var(--dim)">({hosts.length} hosts)</text>
+
+      {/* fabric links */}
+      {edges.map(({ a, b }) => {
+        const key = linkKeyOf(a, b);
+        const anomalous = linkAnomaly[key];
+        const down = linkDown[key];
+        let stroke = "#24517a", width = 1.2, dash = "4,4", op = 0.75;
+        if (down) { stroke = "var(--down)"; dash = "5,4"; width = 2; op = 1; }
+        if (anomalous) { stroke = "var(--anomaly)"; dash = "3,3"; width = 2; op = 1; }
+        const pa = pos[a], pb = pos[b];
+        const dx = pb.x - pa.x, dy = pb.y - pa.y, len = Math.hypot(dx, dy) || 1;
+        const nx = -dy / len, ny = dx / len;
+        return (
+          <g key={key}>
+            <line x1={pa.x} y1={pa.y} x2={pb.x} y2={pb.y}
+              stroke={stroke} strokeWidth={width} strokeDasharray={dash} opacity={op} />
+            {!down && !anomalous && tracks.map((t, i) => {
+              if (!trackEdges[i].has(key)) return null;
+              // Flows sharing a link are drawn side by side, not on top of each other.
+              const off = (i - (tracks.length - 1) / 2) * 4;
+              return (
+                <line key={i} filter="url(#glow)"
+                  x1={pa.x + nx * off} y1={pa.y + ny * off}
+                  x2={pb.x + nx * off} y2={pb.y + ny * off}
+                  stroke={t.color} strokeWidth={tracks.length > 1 ? 2.4 : 3.2} strokeLinecap="round" />
+              );
+            })}
+          </g>
+        );
+      })}
+
+      {/* host stubs + host boxes */}
+      {hosts.map(h => {
+        const hp = hostPos[h.id];
+        const ep = pos[h.edge];
+        const t = tracks.find(t => t.decision && (t.srcIp === h.id || t.dstIp === h.id));
+        return (
+          <g key={h.id}>
+            <line x1={hp.x} y1={hp.y - 12} x2={ep.x} y2={ep.y + 15}
+              stroke={t ? t.color : "#24517a"} strokeWidth={t ? 2.4 : 1}
+              strokeDasharray={t ? undefined : "3,3"} opacity={t ? 1 : 0.7}
+              filter={t ? "url(#glow)" : undefined} />
+            <rect x={hp.x - 20} y={hp.y - 12} width="40" height="24" rx="6"
+              fill="#08182a" stroke={t ? t.color : "#1d4a6b"} strokeWidth={t ? 2 : 1}
+              filter={t ? "url(#glow)" : undefined} />
+            <text x={hp.x} y={hp.y + 4} textAnchor="middle" fontSize="11" fill="var(--fg)">{hostName(h.id)}</text>
+          </g>
+        );
+      })}
+
+      {/* switches */}
+      {nodeList.map(n => {
+        const p = pos[n];
+        const tc = TIER_COLOR[SWITCH_TIER[n]];
+        const t = tracks.find(t => t.decision && (n === t.decision.src || n === t.decision.dst_switch));
+        const onPath = tracks.some((_, i) => [...trackEdges[i]].some(k => k.split("-").map(Number).includes(n)));
+        const color = t ? t.color : tc;
+        return (
+          <g key={n} filter={onPath || t ? "url(#glow)" : undefined}>
+            <circle cx={p.x} cy={p.y} r={15} fill="#081a2c" stroke={color}
+              strokeWidth={onPath || t ? 2.4 : 1.6} opacity={onPath || t ? 1 : 0.9} />
+            <text x={p.x} y={p.y + 4} textAnchor="middle" fontSize="12" fill="var(--fg)">{n}</text>
+          </g>
+        );
+      })}
+    </svg>
+
+    <div className="path-strip">
+      {tracks.map((t, i) => {
+        const d = t.decision;
+        const path = d && Array.isArray(d.path) ? d.path : null;
+        return (
+          <div className="path-row" key={i}>
+            <div>
+              <div className="pr-lbl">
+                {t.label && <span className="flow-dot" style={{ background: t.color }}></span>}
+                Current path{t.label ? ` · ${t.label}` : ""}
+              </div>
+              {d ? (path ? (
+                <div className="chips">
+                  {t.srcIp && <React.Fragment><span className="chip host">{hostName(t.srcIp)}</span><span className="chip-arrow">→</span></React.Fragment>}
+                  {path.map((n, k) => (
+                    <React.Fragment key={k}>
+                      {k > 0 && <span className="chip-arrow">→</span>}
+                      <span className="chip">{n}</span>
+                    </React.Fragment>
+                  ))}
+                  {t.dstIp && <React.Fragment><span className="chip-arrow">→</span><span className="chip host">{hostName(t.dstIp)}</span></React.Fragment>}
+                  {d.flow_class && <span className="chip-arrow" style={{ marginLeft: 6, color: "var(--cyan)" }}>[{d.flow_class}]</span>}
+                </div>
+              ) : <div className="pr-val" style={{ color: "var(--muted)" }}>no path found ({d.src} → {d.dst_switch})</div>)
+              : <div className="pr-val" style={{ color: "var(--dim)" }}>no decisions yet</div>}
+            </div>
+            <div>
+              <div className="pr-lbl">Hops</div>
+              <div className="pr-val">{path ? path.length : "–"}</div>
+            </div>
+            <div>
+              <div className="pr-lbl">Decision latency</div>
+              <div className="pr-val">{d && d.decision_latency_ms != null ? `${d.decision_latency_ms.toFixed(3)} ms` : "–"}</div>
+            </div>
+            <div>
+              <div className="pr-lbl">Selected by</div>
+              <div className="pr-val">{algorithm || "–"}</div>
+              {d && d.algo_info && <div className="pr-sub">{algoInfoText(d.algo_info)}</div>}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+    </React.Fragment>
+  );
+}
+
+function Throughput({ stats, currentTime, t0, tEnd }) {
+  const points = useMemo(() => {
+    if (stats.length === 0) return [];
+    const byTs = {};
+    stats.forEach(s => {
+      const bucket = Math.floor(s.timestamp);
+      byTs[bucket] = (byTs[bucket] || 0) + (s.tx_rate_Bps || 0) + (s.rx_rate_Bps || 0);
+    });
+    return Object.entries(byTs).map(([ts, v]) => ({ ts: Number(ts), v })).sort((a, b) => a.ts - b.ts);
+  }, [stats]);
+
+  if (points.length === 0) return null;
+  const maxV = Math.max(...points.map(p => p.v), 1);
+  const w = 600, h = 56;
+  const span = (tEnd - t0) || 1;
+  const path = points.map((p, i) => {
+    const x = ((p.ts - t0) / span) * w;
+    const y = h - 3 - (p.v / maxV) * (h - 6);
+    return `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+  const cx = ((currentTime - t0) / span) * w;
+  return (
+    <div className="throughput">
+      <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
+        <path d={`${path} L${w},${h} L0,${h} Z`} fill="rgba(25,211,168,.10)" stroke="none" />
+        <path d={path} fill="none" stroke="var(--up)" strokeWidth="1.6" />
+        <line x1={cx} x2={cx} y1={0} y2={h} stroke="var(--accent)" strokeWidth="1" strokeDasharray="3,3" />
+      </svg>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- event stream
+function eventRow(e) {
+  switch (e.type) {
+    case "decision":
+      return {
+        tag: ["decision", "DECISION"], sev: ["info", "INFO"],
+        msg: `${e.src}-${e.dst_switch} ${e.path ? e.path.join("-") : "no path"}` +
+             (e.flow_class ? ` [${e.flow_class}]` : "") +
+             (e.decision_latency_ms != null ? ` (${e.decision_latency_ms.toFixed(3)}ms)` : ""),
+      };
+    case "anomaly": {
+      const det = e.status === "detected";
+      return { tag: det ? ["anomaly", "ANOMALY"] : ["cleared", "CLEARED"],
+               sev: det ? ["high", "HIGH"] : ["info", "INFO"], msg: `${e.switch_a} - ${e.switch_b}` };
+    }
+    case "link_status": {
+      const down = e.status === "down";
+      return { tag: ["link", `LINK ${String(e.status || "").toUpperCase()}`],
+               sev: down ? ["high", "HIGH"] : ["info", "INFO"],
+               msg: `${e.switch_a} - ${e.switch_b}${e.reason ? ` (${e.reason})` : ""}` };
+    }
+    case "eviction":
+      return { tag: ["evict", "EVICT"], sev: ["info", "INFO"],
+               msg: `switch ${e.switch} port ${e.port} (dead link - ${e.other_switch})` };
+    default:
+      return { tag: ["evict", String(e.type).toUpperCase()], sev: ["info", "INFO"], msg: "" };
+  }
+}
+
+function EventStream({ events, currentTime }) {
+  const visible = useMemo(
+    () => events.filter(e => e.ts <= currentTime).slice(-30).reverse(),
+    [events, currentTime]
+  );
+  return (
+    <div className="stream">
+      <div className="stream-head"><span>Time</span><span>Type</span><span>Message</span><span></span></div>
+      <div className="stream-body">
+        {visible.length === 0 && <div className="empty">No events yet at this point in the timeline.</div>}
+        {visible.map((e, i) => {
+          const r = eventRow(e);
+          return (
+            <div className="ev" key={i}>
+              <span className="t">{fmtClock(e.ts)}</span>
+              <span className={`tag ${r.tag[0]}`}>{r.tag[1]}</span>
+              <span className="msg" title={r.msg}>{r.msg}</span>
+              <span className={`sev ${r.sev[0]}`}>{r.sev[1]}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- metrics
+// Mirrors topology.py's ADJACENCY exactly (validated via pingAll against the
+// real daemon). Used only to label port_stats rows with the neighbor switch
+// they belong to, so link utilization can be shown per-link, not per-port.
+const ADJACENCY = {
+  1: { 1: 7, 2: 8, 3: 5, 4: 6 },
+  2: { 1: 7, 2: 8, 3: 5, 4: 6 },
+  3: { 1: 9, 2: 10, 3: 5, 4: 6 },
+  4: { 1: 9, 2: 10, 3: 5, 4: 6 },
+  5: { 1: 1, 2: 2, 3: 3, 4: 4 },
+  6: { 1: 1, 2: 2, 3: 3, 4: 4 },
+  7: { 3: 1, 4: 2 },
+  8: { 3: 1, 4: 2 },
+  9: { 3: 3, 4: 4 },
+  10: { 3: 3, 4: 4 },
+};
+const LINK_CAPACITY_BPS = 1250000; // 10 Mbps in Bytes/sec
+const neighborViaPort = (dpid, port) => (ADJACENCY[dpid] ? (ADJACENCY[dpid][port] ?? null) : null);
+
+function MetricCard({ icon, title, sub, meta, children }) {
+  return (
+    <div className="mcard">
+      <div className="mcard-head">
+        <h3><Icon name={icon} size={16} />{title}{sub && <small>{sub}</small>}</h3>
+        {meta && <span className="meta">{meta}</span>}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function useLatencyPoints(events, currentTime) {
+  return useMemo(
+    () => events.filter(e => e.type === "decision" && e.decision_latency_ms != null && e.ts <= currentTime)
+                .map(e => ({ ts: e.ts, v: e.decision_latency_ms })),
+    [events, currentTime]
+  );
+}
+
+function DecisionLatencyChart({ points }) {
+  if (points.length === 0) return <div className="empty">No decisions yet.</div>;
+  const w = 300, h = 128, pl = 40, pr = 8, pt = 10, pb = 20;
+  const rawMax = Math.max(...points.map(p => p.v), 0.1);
+  const maxV = rawMax * 1.15;
+  const tmin = points[0].ts, tmax = points[points.length - 1].ts;
+  const span = (tmax - tmin) || 1;
+  const X = (ts) => pl + ((ts - tmin) / span) * (w - pl - pr);
+  const Y = (v) => pt + (1 - v / maxV) * (h - pt - pb);
+  const line = points.map((p, i) => `${i === 0 ? "M" : "L"}${X(p.ts).toFixed(1)},${Y(p.v).toFixed(1)}`).join(" ");
+  const area = `${line} L${X(tmax).toFixed(1)},${Y(0)} L${X(tmin).toFixed(1)},${Y(0)} Z`;
+  const peak = points.reduce((a, b) => (b.v > a.v ? b : a), points[0]);
+  const px = X(peak.ts), py = Y(peak.v);
+  const bx = Math.min(Math.max(px - 38, pl), w - pr - 76);
+  const ticks = [0, maxV / 2, maxV];
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} width="100%" style={{ overflow: "visible" }}>
+      <defs>
+        <linearGradient id="latfill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#2f8bff" stopOpacity=".35" /><stop offset="1" stopColor="#2f8bff" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      {ticks.map((t, i) => (
+        <g key={i}>
+          <line x1={pl} x2={w - pr} y1={Y(t)} y2={Y(t)} stroke="#133049" strokeWidth="1" />
+          <text x={pl - 6} y={Y(t) + 3} fontSize="9" textAnchor="end" fill="var(--dim)">{fmtMs(t)}ms</text>
+        </g>
+      ))}
+      <path d={area} fill="url(#latfill)" />
+      <path d={line} fill="none" stroke="#2f8bff" strokeWidth="1.6" strokeLinejoin="round" />
+      <line x1={px} x2={px} y1={py} y2={Y(0)} stroke="#2f8bff" strokeWidth="1" strokeDasharray="2,3" opacity=".6" />
+      <circle cx={px} cy={py} r="3.5" fill="#050b14" stroke="#4db0ff" strokeWidth="2" />
+      <rect x={bx} y={Math.max(py - 30, 0)} width="76" height="24" rx="5" fill="#0d2238" stroke="#1c4565" />
+      <text x={bx + 7} y={Math.max(py - 30, 0) + 10} fontSize="8.5" fill="var(--muted)">{fmtClock(peak.ts)}</text>
+      <text x={bx + 7} y={Math.max(py - 30, 0) + 20} fontSize="9.5" fontWeight="600" fill="var(--fg)">{fmtMs(peak.v)} ms</text>
+      <text x={pl} y={h - 5} fontSize="9" fill="var(--dim)">{fmtClock(tmin)}</text>
+      <text x={w - pr} y={h - 5} fontSize="9" textAnchor="end" fill="var(--dim)">{fmtClock(tmax)}</text>
+    </svg>
+  );
+}
+
+const DONUT_COLORS = ["#19d3a8", "#2f8bff", "#8b7cff", "#22d3ee"];
+function PathDistributionChart({ events, currentTime }) {
+  const { top, total, others } = useMemo(() => {
+    const m = {};
+    let total = 0;
+    events.forEach(e => {
+      if (e.type === "decision" && e.ts <= currentTime && Array.isArray(e.path)) {
+        const key = e.path.join("-");
+        m[key] = (m[key] || 0) + 1;
+        total++;
+      }
+    });
+    const sorted = Object.entries(m).sort((a, b) => b[1] - a[1]);
+    const top = sorted.slice(0, 4);
+    const others = sorted.slice(4).reduce((s, [, c]) => s + c, 0);
+    return { top, total, others };
+  }, [events, currentTime]);
+
+  if (total === 0) return <div className="empty">No decisions yet.</div>;
+  const segs = [...top.map(([name, c], i) => ({ name, c, color: DONUT_COLORS[i] })),
+                ...(others > 0 ? [{ name: "Others", c: others, color: "#3a5068" }] : [])];
+  const R = 38, C = 2 * Math.PI * R;
+  let offset = 0;
+  return (
+    <div className="donut-wrap">
+      <div className="donut">
+        <svg viewBox="0 0 100 100" width="112" height="112" style={{ transform: "rotate(-90deg)" }}>
+          <circle cx="50" cy="50" r={R} fill="none" stroke="#0d2033" strokeWidth="13" />
+          {segs.map((s, i) => {
+            const len = (s.c / total) * C;
+            const el = <circle key={i} cx="50" cy="50" r={R} fill="none" stroke={s.color} strokeWidth="13"
+              strokeDasharray={`${Math.max(len - 1.2, 0)} ${C - Math.max(len - 1.2, 0)}`} strokeDashoffset={-offset} />;
+            offset += len;
+            return el;
+          })}
+        </svg>
+        <div className="center"><b>{total}</b><span>decisions</span></div>
+      </div>
+      <div className="dleg">
+        {segs.map((s, i) => (
+          <div className="dleg-row" key={i}>
+            <span className="d" style={{ background: s.color }}></span>
+            <span className="n" title={s.name}>{s.name}</span>
+            <span className="tr"><i style={{ width: `${(s.c / total) * 100}%`, background: s.color }}></i></span>
+            <span className="p">{((s.c / total) * 100).toFixed(1)}%</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function useLinkUtil(stats, currentTime) {
+  return useMemo(() => {
+    // Most recent sample at-or-before currentTime, per (dpid, port).
+    const latest = {};
+    stats.forEach(s => {
+      if (s.timestamp > currentTime) return;
+      const key = `${s.dpid}:${s.port}`;
+      if (!latest[key] || s.timestamp > latest[key].timestamp) latest[key] = s;
+    });
+    // Group by link (canonical: the lower dpid's reading represents the link).
+    const links = {};
+    Object.values(latest).forEach(s => {
+      const neighbor = neighborViaPort(s.dpid, s.port);
+      if (neighbor == null) return; // host-facing or local port, skip
+      if (!(s.dpid < neighbor)) return;
+      const total = (s.tx_rate_Bps || 0) + (s.rx_rate_Bps || 0);
+      links[linkKeyOf(s.dpid, neighbor)] = total;
+    });
+    return Object.entries(links)
+      .map(([link, bps]) => ({ link, pct: Math.min(100, (bps / LINK_CAPACITY_BPS) * 100) }))
+      .sort((a, b) => b.pct - a.pct)
+      .slice(0, 6);
+  }, [stats, currentTime]);
+}
+
+function BarList({ rows, color, empty }) {
+  if (rows.length === 0) return <div className="empty">{empty}</div>;
+  return (
+    <div className="bar-list">
+      {rows.map(r => (
+        <div className="bar-row" key={r.link}>
+          <span className="bar-lbl">{r.link.replace("-", " ↔ ")}</span>
+          <div className="bar-track">
+            <div className="bar-fill" style={{ width: `${r.pct}%`, background: color(r.pct) }} />
+          </div>
+          <span className="bar-val">{r.pct.toFixed(r.dp ?? 1)}%</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function useDowntime(events, currentTime, t0) {
+  return useMemo(() => {
+    // Walk every anomaly + link_status event in order, tracking an
+    // active-reason count per link (mirrors controller.py's own
+    // _link_down_reasons: down while count > 0, from either reason).
+    const relevant = events
+      .filter(e => (e.type === "anomaly" || e.type === "link_status") && e.ts <= currentTime)
+      .sort((a, b) => a.ts - b.ts);
+    const reasonCount = {}, downSince = {}, downTotal = {};
+    relevant.forEach(e => {
+      const key = linkKeyOf(e.switch_a, e.switch_b);
+      const isDownEvent = e.type === "anomaly" ? e.status === "detected" : e.status === "down";
+      const wasDown = (reasonCount[key] || 0) > 0;
+      reasonCount[key] = Math.max(0, (reasonCount[key] || 0) + (isDownEvent ? 1 : -1));
+      const isDownNow = reasonCount[key] > 0;
+      if (!wasDown && isDownNow) downSince[key] = e.ts;
+      if (wasDown && !isDownNow && downSince[key] != null) {
+        downTotal[key] = (downTotal[key] || 0) + (e.ts - downSince[key]);
+        delete downSince[key];
+      }
+    });
+    Object.entries(downSince).forEach(([key, since]) => {
+      downTotal[key] = (downTotal[key] || 0) + (currentTime - since);
+    });
+    const span = (currentTime - t0) || 1;
+    return Object.entries(downTotal)
+      .map(([link, secs]) => ({ link, pct: Math.min(100, (secs / span) * 100), secs }))
+      .filter(r => r.secs > 0.01)
+      .sort((a, b) => b.pct - a.pct)
+      .slice(0, 6);
+  }, [events, currentTime, t0]);
+}
+
+// ---------------------------------------------------------------- App
+function LiveView() {
+  const { runs, loading: runsLoading, error: runsError, refresh } = useRuns();
+  const [runId, setRunId] = useState(null);
+  const { events, stats, loading: dataLoading } = useRunData(runId);
+  const { status, statusError, refreshStatus } = useLabStatus();
+  const [currentTime, setCurrentTime] = useState(0);
+  const [playing, setPlaying] = useState(false);
+  const [speed, setSpeed] = useState(1);
+  const [followLive, setFollowLive] = useState(false);
+  // Snapshot of the live buffers, taken when the user leaves live mode (Play
+  // or scrubbing), so a just-finished run can be replayed from the start.
+  const [frozen, setFrozen] = useState(null);
+  const skipResetRef = useRef(false);
+  const playRef = useRef(null);
+  const liveEventsRef = useRef([]);
+  const liveStatsRef = useRef([]);
+  // Anchors live polling to "only events from this moment on" whenever the
+  // buffers are reset. Without this, the first poll after a reset has no
+  // lastTs to filter by and silently re-fetches the whole session's history.
+  const liveSinceFloorRef = useRef(0);
+  const [liveTick, setLiveTick] = useState(0); // forces re-render on live append
+
+  const handleLiveRunChange = useCallback((newLiveRunId) => {
+    if (newLiveRunId != null && followLive) {
+      liveEventsRef.current = [];
+      liveStatsRef.current = [];
+      liveSinceFloorRef.current = Date.now() / 1000;
+      setRunId(newLiveRunId);
+      refresh();
+    }
+  }, [followLive, refresh]);
+
+  const { isLive, liveRunId } = useLiveMode(handleLiveRunChange);
+
+  // While following live, poll the current run incrementally and append --
+  // no full refetch, just whatever's new since the last ts seen.
+  useEffect(() => {
+    if (!followLive || runId == null) return;
+    const interval = setInterval(() => {
+      const lastTs = liveEventsRef.current.length
+        ? liveEventsRef.current[liveEventsRef.current.length - 1].ts
+        : liveSinceFloorRef.current;
+      fetch(`${API}/api/runs/${runId}/events?since=${lastTs}`)
+        .then(r => r.json())
+        .then(newEvents => {
+          if (newEvents.length > 0) {
+            liveEventsRef.current = [...liveEventsRef.current, ...newEvents];
+            setLiveTick(t => t + 1);
+          }
+        });
+      const lastStatTs = liveStatsRef.current.length
+        ? liveStatsRef.current[liveStatsRef.current.length - 1].timestamp
+        : liveSinceFloorRef.current;
+      fetch(`${API}/api/runs/${runId}/stats?since=${lastStatTs}`)
+        .then(r => r.json())
+        .then(newStats => {
+          if (newStats.length > 0) {
+            liveStatsRef.current = [...liveStatsRef.current, ...newStats];
+          }
+        });
+    }, 1200);
+    return () => clearInterval(interval);
+  }, [followLive, runId]);
+
+  useEffect(() => {
+    if (runs.length > 0 && runId == null && !followLive) setRunId(runs[0].id);
+  }, [runs, runId, followLive]);
+
+  const effectiveEvents = followLive ? liveEventsRef.current : (frozen ? frozen.events : events);
+  const effectiveStats = followLive ? liveStatsRef.current : (frozen ? frozen.stats : stats);
+
+  // Several flows can be focused at once (a "batch": every Run clicked while
+  // an earlier one is still running joins it). The view shows the union of
+  // their decisions; each flow keeps its own color.
+  const [focusFlows, setFocusFlows] = useState([]);
+  const flowIdRef = useRef(0);
+  const displayEvents = useMemo(() => {
+    if (focusFlows.length === 0) return effectiveEvents;
+    return effectiveEvents.filter(e => e.type !== "decision" || focusFlows.some(f => eventMatchesFlow(e, f)));
+  }, [effectiveEvents, focusFlows]);
+
+  const t0 = effectiveEvents.length ? Math.min(...effectiveEvents.map(e => e.ts)) : 0;
+  const tEnd = effectiveEvents.length ? Math.max(...effectiveEvents.map(e => e.ts)) : 1;
+
+  useEffect(() => {
+    if (followLive) { setCurrentTime(tEnd); return; }
+    if (skipResetRef.current) { skipResetRef.current = false; return; } // leaveLive() already chose the position
+    setCurrentTime(t0);
+  }, [t0, followLive]);
+
+  useEffect(() => {
+    if (followLive) setCurrentTime(tEnd); // always track the live tip
+  }, [followLive, tEnd, liveTick]);
+
+  useEffect(() => {
+    if (playing && !followLive) {
+      playRef.current = setInterval(() => {
+        setCurrentTime(t => {
+          const next = t + speed * (tEnd - t0) / 200;
+          if (next >= tEnd) { setPlaying(false); return tEnd; }
+          return next;
+        });
+      }, 80);
+    }
+    return () => clearInterval(playRef.current);
+  }, [playing, speed, t0, tEnd, followLive]);
+
+  // Leave live mode but keep what was collected, positioned at `at`.
+  const leaveLive = (at) => {
+    setFrozen({ events: [...liveEventsRef.current], stats: [...liveStatsRef.current] });
+    skipResetRef.current = true;
+    setFollowLive(false);
+    setCurrentTime(at);
+  };
+  const onPlay = () => {
+    if (followLive) { leaveLive(t0); setPlaying(true); return; } // replay the run from its start
+    if (currentTime >= tEnd) setCurrentTime(t0);
+    setPlaying(p => !p);
+  };
+  const goLive = () => {
+    setPlaying(false);
+    setFrozen(null);
+    setFollowLive(true);
+  };
+  const onScrub = (v) => {
+    setPlaying(false);
+    if (followLive) { leaveLive(v); return; }
+    setCurrentTime(v);
+  };
+
+  // Called by RunForm once Run has actually sent the traffic: switches into
+  // live tracking (if not already there) and focuses this flow.
+  const enterFocusedLive = ({ src, dst }) => {
+    const t = Date.now();
+    const joining = focusFlows.some(f => isOccupying(f, t));
+    const flow = {
+      id: ++flowIdRef.current, src, dst, startedAt: t,
+      endsAt: t + DEFAULT_RUN_DURATION * 1000,
+      color: FLOW_COLORS[(joining ? focusFlows.length : 0) % FLOW_COLORS.length],
+    };
+    setPlaying(false);
+    setFrozen(null);
+    setFollowLive(true);
+    if (joining) {
+      // Another flow is still running: add to the batch and keep the
+      // buffers, otherwise its events would be thrown away mid-run.
+      setFocusFlows(prev => [...prev, flow]);
+    } else {
+      // Nothing running: fresh batch, clean slate (stale-data fix).
+      setFocusFlows([flow]);
+      liveEventsRef.current = [];
+      liveStatsRef.current = [];
+      liveSinceFloorRef.current = t / 1000;
+      if (liveRunId != null) setRunId(liveRunId);
+    }
+  };
+
+  const stopTopology = () => {
+    postJSON("/api/lab/stop", {}).then(() => refreshStatus());
+  };
+
+  const graph = useMemo(() => buildGraph(), []);
+  const topoUp = !!status?.topology_up;
+  const currentRun = runs.find(r => r.id === (followLive ? liveRunId ?? runId : runId));
+
+  const hasData = !runsError && (followLive || runId != null) && effectiveEvents.length > 0;
+  const decisionsSoFar = displayEvents.filter(e => e.type === "decision" && e.ts <= currentTime).length;
+  const anomaliesSoFar = displayEvents.filter(e => e.type === "anomaly" && e.status === "detected" && e.ts <= currentTime).length;
+  const failuresSoFar = displayEvents.filter(e => e.type === "link_status" && e.status === "down" && e.ts <= currentTime).length;
+
+  const latPoints = useLatencyPoints(displayEvents, currentTime);
+  const latAvg = latPoints.length ? latPoints.reduce((s, p) => s + p.v, 0) / latPoints.length : null;
+  const utilRows = useLinkUtil(effectiveStats, currentTime);
+  const utilAvg = utilRows.length ? utilRows.reduce((s, r) => s + r.pct, 0) / utilRows.length : null;
+  const downRows = useDowntime(displayEvents, currentTime, t0);
+  const downMax = downRows.length ? downRows[0].pct : null;
+
+  const pct = tEnd > t0 ? ((currentTime - t0) / (tEnd - t0)) * 100 : 0;
+
+  return (
+    <React.Fragment>
+      <div className="topbar">
+        <div className="brand">
+          <Icon name="net" size={30} />
+          <h1>SDN Routing Replay</h1>
+        </div>
+        {followLive && <span className="live-badge"><span className="live-dot"></span>LIVE</span>}
+        <div className="spacer"></div>
+        <RunForm status={status} statusError={statusError} refreshStatus={refreshStatus}
+          flows={focusFlows} onRunStarted={enterFocusedLive} />
+      </div>
+
+      {runsError && (
+        <div className="loadmsg">
+          Can't reach the API at {API}. Start it with:<br />
+          <code>cd dashboard/backend && uvicorn main:app --reload --port 8000</code>
+        </div>
+      )}
+
+      {!runsError && (
+        <div className="panel status-panel">
+          <div className="status-head">
+            <span className={`big-dot ${topoUp ? "" : "off"}`}></span>
+            <h2>Network status</h2>
+            <span className="pill"><span className="dot" style={{ background: followLive ? "var(--up)" : "var(--dim)" }}></span>
+              {followLive ? "Live" : "Replay"}{hasData ? ` · ${fmtDur(tEnd - t0)}` : ""}
+            </span>
+            {status?.algorithm && <span className="pill">running: <b style={{ color: "var(--fg)", fontWeight: 500 }}>{status.algorithm}</b></span>}
+            <div className="spacer"></div>
+            {topoUp && <button className="danger" onClick={stopTopology}>Stop topology</button>}
+          </div>
+          <div className="stats">
+            <StatCard icon="topo" label="Topology status" value={topoUp ? "Healthy" : "Down"}
+              sub={topoUp ? "10 switches • 8 hosts" : "start it with Run"} tone={topoUp ? "ok" : "off"} corner={topoUp ? "check" : null} />
+            <ActiveFlowsCard flows={focusFlows} topoUp={topoUp} />
+            <StatCard icon="dec" label="Decisions made" value={decisionsSoFar}
+              sub={focusFlows.length ? "for focused flows" : "in this run"} corner="chart" />
+            <StatCard icon="alert" label="Anomalies" value={anomaliesSoFar} sub="detected"
+              tone={anomaliesSoFar > 0 ? "bad" : ""} corner={anomaliesSoFar > 0 ? "alert" : null} />
+            <StatCard icon="link" label="Physical failures" value={failuresSoFar}
+              sub={failuresSoFar > 0 ? "link down events" : "none"} corner="shield" />
+          </div>
+        </div>
+      )}
+
+      {!runsError && !followLive && runs.length === 0 && !runsLoading && (
+        <div className="loadmsg">
+          No runs yet. Pick an algorithm and hosts above and click Run — or run a test with the controller and
+          ingest it with <code>python3 ingest.py</code>.
+        </div>
+      )}
+
+      {!runsError && followLive && effectiveEvents.length === 0 && (
+        <div className="loadmsg">Waiting for the first event from the running test…</div>
+      )}
+
+      {hasData && (
+        <React.Fragment>
+          <AnomalyBanner events={displayEvents} currentTime={currentTime} />
+
+          <div className="main-grid">
+            <div className="panel">
+              <div className="panel-head">
+                <div>
+                  <h2 className="panel-title"><Icon name="topo" size={18} />Topology &amp; live path</h2>
+                  <p className="panel-sub">Fat-tree topology with current routing path</p>
+                </div>
+                <div className="legend">
+                  <span className="lg"><span className="sw" style={{ background: TIER_COLOR.core }}></span>Core</span>
+                  <span className="lg"><span className="sw" style={{ background: TIER_COLOR.agg }}></span>Aggregation</span>
+                  <span className="lg"><span className="sw" style={{ background: TIER_COLOR.edge }}></span>Edge</span>
+                  <span className="lg"><span className="ln"></span>Current path</span>
+                  <span className="lg"><span className="ln dash"></span>Other links</span>
+                </div>
+              </div>
+              <Topology graph={graph} events={displayEvents} currentTime={currentTime}
+                flows={focusFlows} algorithm={status?.algorithm} />
+              {effectiveStats.length > 0 && (
+                <div className="throughput-wrap">
+                  <h3>Total network throughput (all links, whole session)</h3>
+                  <Throughput stats={effectiveStats} currentTime={currentTime} t0={t0} tEnd={tEnd} />
+                </div>
+              )}
+            </div>
+
+            <div className="panel stream">
+              <div className="panel-head">
+                <h2 className="panel-title"><Icon name="list" size={18} />Live event stream</h2>
+                <span className="pill"><span className="dot"></span>Real-time events (last 30)</span>
+              </div>
+              <EventStream events={displayEvents} currentTime={currentTime} />
+            </div>
+
+            <div className="metrics-side">
+              <MetricCard icon="clock" title="Decision latency over time"
+                meta={latAvg != null ? <React.Fragment>Avg <b>{fmtMs(latAvg)} ms</b></React.Fragment> : null}>
+                <DecisionLatencyChart points={latPoints} />
+              </MetricCard>
+              <MetricCard icon="pie" title="Path distribution" sub="(top paths)">
+                <PathDistributionChart events={displayEvents} currentTime={currentTime} />
+              </MetricCard>
+              <MetricCard icon="chart" title="Link utilization" sub="(% of 10Mbps)"
+                meta={utilAvg != null ? <React.Fragment>Avg <b>{utilAvg.toFixed(1)}%</b></React.Fragment> : null}>
+                <BarList rows={utilRows} empty="No link stats yet."
+                  color={p => (p > 80 ? "linear-gradient(90deg,#ff4d5e,#ff7a86)" : "linear-gradient(90deg,#1e7fe0,#2fa0ff)")} />
+              </MetricCard>
+              <MetricCard icon="alert" title="Link downtime" sub="(% of run)"
+                meta={downMax != null ? <React.Fragment>Max <b>{downMax.toFixed(1)}%</b></React.Fragment> : null}>
+                <BarList rows={downRows} empty="No downtime recorded."
+                  color={() => "linear-gradient(90deg,#ff4d5e,#ff7a86)"} />
+              </MetricCard>
+            </div>
+          </div>
+
+          <div className="panel timeline">
+            <button className="play" onClick={onPlay}
+              title={followLive ? "Replay this run from the start" : (playing ? "Pause" : "Play")}>
+              <Icon name={playing ? "pause" : "play"} size={16} />
+            </button>
+            <select value={speed} onChange={e => setSpeed(Number(e.target.value))}>
+              {[0.5, 1, 2, 4].map(s => <option key={s} value={s}>{s}x</option>)}
+            </select>
+            {frozen && !followLive && <button onClick={goLive} title="Follow the newest events again">● Live</button>}
+            <input type="range" className="scrub" min={t0} max={tEnd} step="0.05" value={currentTime}
+              style={{ background: `linear-gradient(to right, var(--accent) ${pct}%, #12304a ${pct}%)` }}
+              onChange={e => onScrub(Number(e.target.value))} />
+            <span className="tl-meta">{effectiveEvents.length} events</span>
+            {focusFlows.length > 0 && <FlowChips flows={focusFlows} />}
+            <span className="tl-meta">{fmtDur(currentTime - t0)} / {fmtDur(tEnd - t0)}</span>
+          </div>
+        </React.Fragment>
+      )}
+
+      {dataLoading && !followLive && <div className="loadmsg">Loading run data…</div>}
+    </React.Fragment>
+  );
+}
+
+// ======================================================================
+// Compare + Results views
+// ======================================================================
+const COMPARE_CHOICES = [
+  { id: "shortest_path", name: "Shortest path", note: "always the same route" },
+  { id: "random_path", name: "Random path", note: "picks a route at random" },
+  { id: "global_rr", name: "Round-robin", note: "takes turns, blind to load" },
+  { id: "least_congested", name: "Least-congested", note: "reads the live link load" },
+  { id: "lcp_pending", name: "Least-congested + memory", note: "also remembers flows it just placed" },
+  { id: "q_learning", name: "Q-learning (trained)", note: "the learning agent" },
+];
+const COMPARE_NAME = Object.fromEntries(COMPARE_CHOICES.map(c => [c.id, c.name]));
+
+function heatColor(mbps) {
+  const u = mbps / 10;
+  if (u >= 0.9) return "#ff4d5e";
+  if (u >= 0.5) return "#f0a93b";
+  if (u >= 0.05) return "#22d3ee";
+  return "#1d3b57";
+}
+
+function HeatTopology({ linkMbps }) {
+  return (
+    <svg viewBox="0 0 700 290" className="heat-topo">
+      {STATIC_EDGES.map(([a, b]) => {
+        const key = a < b ? `${a}-${b}` : `${b}-${a}`;
+        const v = linkMbps?.[key] ?? 0;
+        const pa = SWITCH_POS[a], pb = SWITCH_POS[b];
+        return (
+          <line key={key} x1={pa.x} y1={pa.y} x2={pb.x} y2={pb.y}
+            stroke={heatColor(v)} strokeWidth={v < 0.05 ? 1.4 : 2 + Math.min(v, 10) * 0.55}
+            strokeLinecap="round" opacity={v < 0.05 ? 0.7 : 1} />
+        );
+      })}
+      {Object.entries(SWITCH_POS).map(([id, p]) => (
+        <circle key={id} cx={p.x} cy={p.y} r="9" fill={TIER_COLOR[SWITCH_TIER[id]]} opacity="0.95" />
+      ))}
+      {[["Core", 46], ["Aggregation", 140], ["Edge", 234]].map(([n, y]) => (
+        <text key={n} x="6" y={y + 4} fontSize="11" fill="var(--dim)">{n}</text>
+      ))}
+    </svg>
+  );
+}
+
+function CompareCard({ algo, result, active, flowsOffered }) {
+  const pct = result ? Math.min(100, (result.delivered_mbps / flowsOffered) * 100) : 0;
+  const tone = result ? (pct >= 97 ? "good" : pct >= 70 ? "mid" : "bad") : "";
+  return (
+    <div className={`cmp-card ${active ? "active" : ""}`}>
+      <div className="cmp-name">{COMPARE_NAME[algo] || algo}</div>
+      {!result ? (
+        <div className="cmp-wait">{active ? "running now…" : "waiting"}</div>
+      ) : (
+        <React.Fragment>
+          <div className={`cmp-big ${tone}`}>{result.delivered_mbps.toFixed(1)}<small> Mbps delivered</small></div>
+          <div className="cmp-track"><div className={`cmp-fill ${tone}`} style={{ width: `${pct}%` }} /></div>
+          <div className="cmp-sub">{pct.toFixed(0)}% of the {flowsOffered.toFixed(1)} Mbps sent</div>
+          <HeatTopology linkMbps={result.link_mbps} />
+          <div className="cmp-stats">
+            <span>busiest link <b className={result.max_link_mbps >= 9 ? "hot" : ""}>{result.max_link_mbps.toFixed(1)}</b> / 10 Mbps</span>
+            <span>links used <b>{result.links_used}</b> of 16</span>
+          </div>
+        </React.Fragment>
+      )}
+    </div>
+  );
+}
+
+
+const ALGO_COLOR = {
+  shortest_path: "#ff4d5e", random_path: "#8aa0b5", global_rr: "#b48cff",
+  least_congested: "#f0a93b", lcp_pending: "#19d3a8", q_learning: "#3a9bff",
+};
+
+// Delivered throughput per second, one line per algorithm.
+function TimelineChart({ algos, results, offered }) {
+  const W = 760, H = 280, L = 44, R = 150, T = 14, B = 34;
+  const have = algos.filter(a => results[a] && results[a].timeline_mbps && results[a].timeline_mbps.length);
+  if (have.length === 0) return null;
+  const n = Math.max(...have.map(a => results[a].timeline_mbps.length));
+  const yMax = Math.ceil(Math.max(offered, ...have.flatMap(a => results[a].timeline_mbps)) / 10) * 10 + 5;
+  const x = i => L + ((i) / (n)) * (W - L - R);
+  const y = v => T + (1 - v / yMax) * (H - T - B);
+  const ticks = [];
+  for (let v = 0; v <= yMax; v += 10) ticks.push(v);
+  // direct labels at the line ends, nudged apart so they never overlap
+  const ends = have.map(a => ({ a, y: y(results[a].timeline_mbps[results[a].timeline_mbps.length - 1]) }))
+    .sort((p, q) => p.y - q.y);
+  for (let i = 1; i < ends.length; i++) if (ends[i].y - ends[i - 1].y < 14) ends[i].y = ends[i - 1].y + 14;
+  return (
+    <div className="panel gr-panel">
+      <h2 className="panel-title">Throughput over time</h2>
+      <p className="cmp-text" style={{ margin: 0 }}>
+        Total traffic delivered each second, summed over the six flows. A good algorithm reaches the dashed line
+        (what was sent) quickly and stays there; a poor one plateaus lower because flows share a saturated link.
+      </p>
+      <svg viewBox={`0 0 ${W} ${H}`} className="gr-svg" style={{ maxWidth: 1000 }} role="img" aria-label="Delivered throughput over time for each algorithm">
+        {ticks.map(v => (
+          <g key={v}>
+            <line className="gl" x1={L} x2={W - R} y1={y(v)} y2={y(v)} />
+            <text x={L - 8} y={y(v) + 4} textAnchor="end">{v}</text>
+          </g>
+        ))}
+        <line className="ax" x1={L} x2={W - R} y1={y(0)} y2={y(0)} />
+        {Array.from({ length: n }, (_, i) => i + 1).map(i => (
+          <text key={i} x={x(i)} y={H - B + 16} textAnchor="middle">{i}</text>
+        ))}
+        <text x={(L + W - R) / 2} y={H - 4} textAnchor="middle">seconds since the flows started</text>
+        <text x={12} y={T + 6} textAnchor="start">Mbps</text>
+        <line x1={L} x2={W - R} y1={y(offered)} y2={y(offered)} stroke="#e6edf5" strokeDasharray="5 4" strokeWidth="1.2" opacity="0.7" />
+        <text x={L + 8} y={y(offered) - 6} style={{ fill: "#e6edf5" }}>sent {offered.toFixed(1)} Mbps</text>
+        {have.map(a => {
+          const pts = results[a].timeline_mbps.map((v, i) => `${x(i + 1)},${y(v)}`).join(" ");
+          return <polyline key={a} points={pts} fill="none" stroke={ALGO_COLOR[a] || "#fff"} strokeWidth="2.4"
+            strokeLinejoin="round" strokeLinecap="round" />;
+        })}
+        {ends.map(e => (
+          <text key={e.a} x={W - R + 6} y={e.y + 4} style={{ fill: ALGO_COLOR[e.a] || "#fff", fontWeight: 600 }}>
+            {(COMPARE_NAME[e.a] || e.a).replace("Least-congested + memory", "LC + memory")}
+          </text>
+        ))}
+      </svg>
+    </div>
+  );
+}
+
+// Load on the 8 edge-to-aggregation links, one small chart per algorithm.
+function UplinkBalance({ algos, results }) {
+  const have = algos.filter(a => results[a] && results[a].uplink_mbps && results[a].uplink_mbps.length);
+  if (have.length === 0) return null;
+  const W = 240, H = 130, L = 26, T = 8, B = 20;
+  return (
+    <div className="panel gr-panel">
+      <h2 className="panel-title">Load balance across the 8 edge uplinks</h2>
+      <p className="cmp-text" style={{ margin: 0 }}>
+        Each bar is one link between an edge and an aggregation switch (10 Mbps capacity, dashed line). An even
+        spread means the controller shares the load; tall and empty bars mean some links are overloaded while others idle.
+        The balance index is 1.00 when every link carries the same load and falls towards 0.13 when one link carries it all.
+      </p>
+      <div className="gr-multi">
+        {have.map(a => {
+          const r = results[a];
+          const bw = (W - L - 6) / r.uplink_mbps.length;
+          const y = v => T + (1 - Math.min(v, 10.5) / 10.5) * (H - T - B);
+          const j = r.jain_uplinks;
+          const tone = j >= 0.9 ? "good" : j >= 0.7 ? "mid" : "bad";
+          return (
+            <div className="gr-mini" key={a}>
+              <h3 style={{ color: ALGO_COLOR[a] }}>{COMPARE_NAME[a] || a}</h3>
+              <svg viewBox={`0 0 ${W} ${H}`} className="gr-svg" role="img" aria-label={`Uplink load, ${COMPARE_NAME[a] || a}`}>
+                {[0, 5, 10].map(v => (
+                  <g key={v}>
+                    <line className="gl" x1={L} x2={W} y1={y(v)} y2={y(v)} />
+                    <text x={L - 5} y={y(v) + 4} textAnchor="end">{v}</text>
+                  </g>
+                ))}
+                <line x1={L} x2={W} y1={y(10)} y2={y(10)} stroke="#e6edf5" strokeDasharray="4 3" opacity="0.6" />
+                {r.uplink_mbps.map((u, i) => (
+                  <g key={u.link}>
+                    <rect x={L + i * bw + 3} y={y(u.mbps)} width={bw - 6} height={Math.max(1, y(0) - y(u.mbps))}
+                      rx="2" fill={ALGO_COLOR[a] || "#6f8aa3"} opacity={u.mbps < 0.5 ? 0.25 : 0.95} />
+                    <text x={L + i * bw + bw / 2} y={H - 6} textAnchor="middle" style={{ fontSize: 9 }}>{u.link}</text>
+                  </g>
+                ))}
+              </svg>
+              <div className="jn">balance index <b className={tone}>{j.toFixed(2)}</b> &nbsp;·&nbsp; busiest uplink <b>{Math.max(...r.uplink_mbps.map(u => u.mbps)).toFixed(1)}</b> Mbps</div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function CompareView() {
+  const [selected, setSelected] = useState(["shortest_path", "least_congested", "lcp_pending"]);
+  const [data, setData] = useState(null);
+  const [msg, setMsg] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const poll = useCallback(() => {
+    fetch(`${API}/api/lab/compare`).then(r => r.json()).then(d => {
+      if (d && d.state) setData(d);
+    }).catch(() => {});
+  }, []);
+  useEffect(() => {
+    poll();
+    const id = setInterval(poll, 1500);
+    return () => clearInterval(id);
+  }, [poll]);
+
+  const running = data?.state === "running";
+  const toggle = (id) => setSelected(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id]);
+  const start = () => {
+    setMsg(null); setBusy(true);
+    const order = COMPARE_CHOICES.map(c => c.id).filter(id => selected.includes(id));
+    fetch(`${API}/api/lab/compare`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ algorithms: order, flows: 6 }),
+    }).then(r => r.json().then(d => ({ ok: r.ok, d })))
+      .then(({ ok, d }) => {
+        if (!ok) setMsg(d.detail || "Lab daemon error");
+        else if (d.error) setMsg(d.error);
+        else poll();
+      })
+      .catch(() => setMsg(`Can't reach the API at ${API}`))
+      .finally(() => setBusy(false));
+  };
+
+  const algos = data?.algorithms || [];
+  const results = data?.results || {};
+  const done = data?.state === "done";
+  const offered = data?.offered_mbps || 50.3;
+  const ranked = algos.filter(a => results[a]).sort((a, b) => results[b].delivered_mbps - results[a].delivered_mbps);
+  const best = ranked[0], worst = ranked[ranked.length - 1];
+  const elapsed = running && data?.started ? Math.round(Date.now() / 1000 - data.started) : 0;
+
+  return (
+    <div className="cmp-wrap">
+      <div className="panel cmp-intro">
+        <h2 className="panel-title">Compare routing algorithms on the same traffic</h2>
+        <p className="cmp-text">
+          Six cross-pod UDP flows (8 Mbps each, 50 Mbps in total) start at the same moment on a network of 10 Mbps links.
+          The <b>same six flows</b> are replayed under each algorithm you pick, so the only thing that differs is how the
+          controller chooses routes. Takes about 25 seconds per algorithm.
+        </p>
+        <div className="cmp-choices">
+          {COMPARE_CHOICES.map(c => (
+            <label key={c.id} className={`cmp-choice ${selected.includes(c.id) ? "on" : ""}`}>
+              <input type="checkbox" checked={selected.includes(c.id)} disabled={running}
+                onChange={() => toggle(c.id)} />
+              <span><b>{c.name}</b><small>{c.note}</small></span>
+            </label>
+          ))}
+        </div>
+        <div className="cmp-actions">
+          <button className="run" onClick={start} disabled={running || busy || selected.length < 2}>
+            {running ? `Running… ${elapsed}s` : "Run comparison"}
+          </button>
+          {selected.length < 2 && <span className="form-msg hint">Pick at least two.</span>}
+          {running && <span className="form-msg hint">{data.current ? `${COMPARE_NAME[data.current] || data.current}: ${data.phase}` : data.phase}</span>}
+          {msg && <span className="form-msg err">{msg}</span>}
+          {data?.state === "error" && <span className="form-msg err">{data.error}</span>}
+        </div>
+      </div>
+
+      {algos.length > 0 && (
+        <React.Fragment>
+          <div className="cmp-grid">
+            {algos.map(a => (
+              <CompareCard key={a} algo={a} result={results[a]} active={running && data.current === a}
+                flowsOffered={offered} />
+            ))}
+          </div>
+          {(done || (data?.results && Object.keys(results).length > 0)) && (
+            <React.Fragment>
+              <TimelineChart algos={algos} results={results} offered={offered} />
+              <UplinkBalance algos={algos} results={results} />
+            </React.Fragment>
+          )}
+          <div className="cmp-legend">
+            Link colour: <span style={{ color: "#22d3ee" }}>■</span> lightly used &nbsp;
+            <span style={{ color: "#f0a93b" }}>■</span> half full &nbsp;
+            <span style={{ color: "#ff4d5e" }}>■</span> saturated (≥ 9 of 10 Mbps) &nbsp;
+            <span style={{ color: "#1d3b57" }}>■</span> unused
+          </div>
+          {done && best && worst && best !== worst && (
+            <div className="panel cmp-verdict">
+              <b>{COMPARE_NAME[best]}</b> delivered <b>{(results[best].delivered_mbps - results[worst].delivered_mbps).toFixed(1)} Mbps more</b> than{" "}
+              <b>{COMPARE_NAME[worst]}</b> on the same flows ({results[best].delivered_mbps.toFixed(1)} against {results[worst].delivered_mbps.toFixed(1)}).
+              This is a single run of {data.flows.length} flows (seed {data.seed}); the 15-repetition evidence is on the Results tab.
+            </div>
+          )}
+        </React.Fragment>
+      )}
+      {algos.length === 0 && (
+        <div className="loadmsg">Pick the algorithms and click Run comparison. The network and controller are started for you.</div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- validated results
+const EVIDENCE_SIMULTANEOUS = [
+  { n: "Least-congested + memory", v: 50.39, ci: 0.01, t: "good" },
+  { n: "Q-learning + memory", v: 50.39, ci: 0.01, t: "good" },
+  { n: "Random path", v: 36.18, ci: 2.83, t: "" },
+  { n: "Q-learning (no memory)", v: 34.59, ci: 0.88, t: "" },
+  { n: "Round-robin", v: 33.67, ci: 0.78, t: "" },
+  { n: "Least-congested (no memory)", v: 24.95, ci: 3.07, t: "bad" },
+  { n: "Shortest path", v: 19.44, ci: 0, t: "bad" },
+];
+const EVIDENCE_BACKGROUND = [
+  { n: "Least-congested", v: 50.34, ci: 0, t: "good" },
+  { n: "Least-congested + memory", v: 50.34, ci: 0, t: "good" },
+  { n: "Q-learning (trained)", v: 48.57, ci: 1.68, t: "good" },
+  { n: "Q-learning + memory", v: 45.22, ci: 2.43, t: "good" },
+  { n: "Round-robin", v: 37.77, ci: 2.43, t: "" },
+  { n: "Random path", v: 35.37, ci: 1.63, t: "" },
+  { n: "Q-learning (old state)", v: 33.33, ci: 1.55, t: "bad" },
+  { n: "Shortest path", v: 20.47, ci: 3.16, t: "bad" },
+];
+
+
+const EVIDENCE_EIGHT = [
+  { n: "Least-congested + memory", v: 67.24, ci: 0.01, t: "good" },
+  { n: "Random path", v: 41.34, ci: 3.04, t: "" },
+  { n: "Q-learning (trained on 6 flows)", v: 38.90, ci: 0.01, t: "" },
+  { n: "Least-congested (no memory)", v: 29.09, ci: 3.96, t: "bad" },
+  { n: "Shortest path", v: 19.45, ci: 0.01, t: "bad" },
+];
+const EVIDENCE_MIXED = [
+  { n: "Least-congested + memory", v: 25.19, ci: 0, t: "good" },
+  { n: "Q-learning (trained)", v: 20.21, ci: 0, t: "" },
+  { n: "Random path", v: 19.10, ci: 0, t: "" },
+  { n: "Least-congested, class-aware", v: 18.32, ci: 0, t: "" },
+  { n: "Least-congested (no memory)", v: 17.48, ci: 0, t: "bad" },
+  { n: "Shortest path", v: 16.52, ci: 0, t: "bad" },
+];
+const EVIDENCE_FAILURE = [
+  { n: "Least-congested", v: 28, ci: 6, t: "good" },
+  { n: "Shortest path", v: 34, ci: 1, t: "good" },
+];
+const EVIDENCE_RTT = [
+  { n: "Least-congested", v: 0.30, ci: 0.03, t: "good" },
+  { n: "Least-congested, class-aware", v: 0.31, ci: 0.03, t: "good" },
+  { n: "Shortest path", v: 7.57, ci: 0.48, t: "bad" },
+];
+const EVIDENCE_JITTER = [
+  { n: "Least-congested", v: 0.032, ci: 0.002, t: "good" },
+  { n: "Least-congested, class-aware", v: 0.037, ci: 0.005, t: "good" },
+  { n: "Shortest path", v: 1.55, ci: 0.05, t: "bad" },
+];
+
+function EvidenceChart({ rows, max, dec = 1, unit = "" }) {
+  return (
+    <div className="ev-chart">
+      {rows.map(r => (
+        <div className="ev-row" key={r.n}>
+          <span className="ev-nm">{r.n}</span>
+          <div className="ev-track">
+            <div className={`ev-fill ${r.t}`} style={{ width: `${(r.v / max) * 100}%` }} />
+            {r.ci > 0 && <div className="ev-ci" style={{ left: `${((r.v - r.ci) / max) * 100}%`, width: `${(2 * r.ci / max) * 100}%` }} />}
+          </div>
+          <span className="ev-v">{r.v.toFixed(dec)}{unit}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ResultsView() {
+  return (
+    <div className="res-wrap">
+      <div className="res-hero">
+        <div className="res-stat"><div className="num">+14.2 Mbps</div><div className="lbl">placement-aware routing vs random, six simultaneous flows, better in 15 of 15 runs</div></div>
+        <div className="res-stat bad"><div className="num">&minus;11.2 Mbps</div><div className="lbl">plain least-congested routing on the same test: worse than random</div></div>
+        <div className="res-stat"><div className="num">28 ms</div><div className="lbl">a flow is cut by a link failure before it reroutes (10 repetitions)</div></div>
+        <div className="res-stat"><div className="num">0.3 vs 7.6 ms</div><div className="lbl">ping delay beside bulk TCP: load-aware routing vs shortest path</div></div>
+      </div>
+
+      <div className="panel">
+        <h2 className="panel-title">Six flows start at the same moment</h2>
+        <p className="cmp-text">Delivered throughput in Mbps (50.3 sent). Mean of 15 paired repetitions; the thin bar is the 95% confidence interval.</p>
+        <EvidenceChart rows={EVIDENCE_SIMULTANEOUS} max={52} />
+        <p className="res-note">Plain least-congested routing reads statistics that refresh every 0.5 s, so flows that start together all see an idle network and pile onto one path. Reserving each new flow's expected load on its path (<i>placement memory</i>) fixes this completely.</p>
+      </div>
+
+      <div className="panel">
+        <h2 className="panel-title">A background flow already loads one path</h2>
+        <p className="cmp-text">One 8 Mbps flow is pinned to a path; six flows then arrive 2.5 s apart. 15 paired repetitions.</p>
+        <EvidenceChart rows={EVIDENCE_BACKGROUND} max={52} />
+        <p className="res-note">Every load-aware algorithm steers around the loaded path and leaves the background flow almost untouched. Load-blind routing cannot.</p>
+      </div>
+
+      <div className="panel">
+        <h2 className="panel-title">Eight flows start at the same moment</h2>
+        <p className="cmp-text">Delivered throughput in Mbps (67.1 sent). 15 paired repetitions. The agent was trained on six flows only.</p>
+        <EvidenceChart rows={EVIDENCE_EIGHT} max={72} />
+        <p className="res-note">Placement memory still delivers everything that was sent. The trained agent is no better than random at eight flows; retraining it on eight flows made it worse (29.2 Mbps), because it has no memory of where it just placed flows.</p>
+      </div>
+
+      <div className="panel">
+        <h2 className="panel-title">Mixed UDP and TCP traffic</h2>
+        <p className="cmp-text">UDP delivered in Mbps (25.2 sent) with three TCP flows running at the same time. Mean of 15 repetitions.</p>
+        <EvidenceChart rows={EVIDENCE_MIXED} max={27} />
+        <p className="res-note">Only placement memory helps (UDP loss 0% in every run; total throughput +6.1 &plusmn; 2.4 Mbps against random). Class-aware routing is not better than random here. TCP figures are noisier because each TCP flow is capped by a meter shared per switch.</p>
+      </div>
+
+      <div className="res-two">
+        <div className="panel">
+          <h2 className="panel-title">How long a link failure cuts a flow</h2>
+          <p className="cmp-text">Milliseconds without a reply, ping every 5 ms, 10 repetitions. Lower is better.</p>
+          <EvidenceChart rows={EVIDENCE_FAILURE} max={45} dec={0} unit=" ms" />
+          <p className="res-note">With both uplinks of the source switch down there were no replies in all 20 runs: the switch is isolated and the controller reports it.</p>
+        </div>
+        <div className="panel">
+          <h2 className="panel-title">Delay beside bulk TCP</h2>
+          <p className="cmp-text">Ping round-trip time in milliseconds, three TCP bulk flows running. Lower is better.</p>
+          <EvidenceChart rows={EVIDENCE_RTT} max={9} dec={2} unit=" ms" />
+          <p className="cmp-text" style={{ marginTop: 18 }}>UDP jitter in milliseconds, same test.</p>
+          <EvidenceChart rows={EVIDENCE_JITTER} max={1.8} dec={3} unit=" ms" />
+        </div>
+      </div>
+
+      <div className="res-two">
+        <div className="panel">
+          <h2 className="panel-title">What the project shows</h2>
+          <ul className="res-list">
+            <li>Load-aware multipath routing delivers up to <b>2.6 times</b> the throughput of shortest-path routing on the same network.</li>
+            <li>Routing that is blind to load is no better than choosing at random.</li>
+            <li>Remembering where flows were just placed matters as much as measuring load: without it, load-aware routing is <b>worse than random</b> for simultaneous arrivals.</li>
+            <li>Beside bulk TCP, load-aware routing keeps UDP delay about 25 times and jitter about 50 times lower.</li>
+            <li>A failed link is routed around in tens of milliseconds, and an isolated switch is reported as unreachable rather than silently failing.</li>
+          </ul>
+        </div>
+        <div className="panel">
+          <h2 className="panel-title">What it does not show</h2>
+          <ul className="res-list">
+            <li>The Q-learning agent <b>matches</b> the best heuristic where it was trained but never beats it; with eight simultaneous flows it is no better than random, and retraining it on eight made it worse.</li>
+            <li>Class-aware (QoS) routing was not measurably better than plain least-congested routing.</li>
+            <li>The anomaly detector is stable but cannot tell a flood from legitimate full-rate traffic.</li>
+            <li>One 10-switch topology, UDP flows of one size, emulation rather than hardware.</li>
+          </ul>
+        </div>
+      </div>
+      <div className="res-foot">All results: 10 Mbps links, 8 Mbps UDP flows, fresh controller per run, same flows for every algorithm within a repetition. Full method in the written report.</div>
+    </div>
+  );
+}
+
+function App() {
+  const [tab, setTab] = useState("live");
+  return (
+    <React.Fragment>
+      <div className="tabs">
+        {[["live", "Live"], ["compare", "Compare"], ["results", "Results"]].map(([id, label]) => (
+          <button key={id} className={`tab ${tab === id ? "on" : ""}`} onClick={() => setTab(id)}>{label}</button>
+        ))}
+      </div>
+      <div style={{ display: tab === "live" ? "block" : "none" }}><LiveView /></div>
+      {tab === "compare" && <CompareView />}
+      {tab === "results" && <ResultsView />}
+    </React.Fragment>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
