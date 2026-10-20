@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # One command to run the whole dashboard.
 #
-#   cd ~/Documents/sdn-rl
+#   cd ~/sdn-rl
 #   bash start_dashboard.sh          # starts daemon + backend + frontend
 #   (Ctrl+C in this terminal stops all three cleanly)
 #
@@ -28,8 +28,16 @@ stop_all() {
     # an old daemon (from before the shutdown fix) ignores TERM
     sudo pkill -KILL -f '[l]ab_daemon.py' 2>/dev/null
   fi
+  # free the ports whoever started the old copies (even a manual start, even as root)
+  for port in 8000 5173 9191; do
+    for pid in $(sudo ss -ltnpH "sport = :$port" 2>/dev/null | grep -o 'pid=[0-9]*' | cut -d= -f2 | sort -u); do
+      sudo kill -9 "$pid" 2>/dev/null
+    done
+  done
   sudo mn -c >/dev/null 2>&1
 }
+
+port_busy() { sudo ss -ltnH "sport = :$1" 2>/dev/null | grep -q .; }
 
 if [[ "${1:-}" == "stop" ]]; then
   echo "Stopping dashboard..."
@@ -39,7 +47,7 @@ if [[ "${1:-}" == "stop" ]]; then
 fi
 
 # ---- checks -----------------------------------------------------------
-[[ -f dashboard/lab/lab_daemon.py ]]       || { echo "Run this from ~/Documents/sdn-rl (dashboard/lab/lab_daemon.py not found)"; exit 1; }
+[[ -f dashboard/lab/lab_daemon.py ]]       || { echo "Run this from ~/sdn-rl (dashboard/lab/lab_daemon.py not found)"; exit 1; }
 [[ -x dashboard/backend/venv/bin/uvicorn ]] || { echo "Backend venv missing: dashboard/backend/venv/bin/uvicorn"; exit 1; }
 grep -q "class Server" dashboard/lab/lab_daemon.py || echo "WARNING: lab_daemon.py is the old version (no shutdown fix). Copy the new one in."
 if [[ -f models/anomaly_model.joblib ]]; then
@@ -53,6 +61,14 @@ sudo -v || exit 1
 # ---- clean start ------------------------------------------------------
 echo "Clearing anything left over from last time..."
 stop_all
+
+for port in 8000 5173 9191; do
+  if port_busy "$port"; then
+    echo "Port $port is still in use and could not be freed:"
+    sudo ss -ltnp "sport = :$port"
+    exit 1
+  fi
+done
 
 # keep sudo's ticket alive while we run
 ( while true; do sudo -n true 2>/dev/null; sleep 50; done ) &
