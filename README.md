@@ -1,14 +1,5 @@
 # Dynamic Load Balancing in SDN using Reinforcement Learning
 
-> **Read this first.** This README is written so that someone who knows
-> nothing about networking or machine learning (including future-you after
-> a long break) can understand what this project is, how it works, and how
-> to run it. Sections 1-6 explain the ideas, section 7 gives the results,
-> sections 8-10 cover the live dashboard and how to start everything, and
-> the appendix keeps the original planning notes and the detailed build log.
-
----
-
 ## 1. What this project is, in plain words
 
 Think of a computer network as a road system. Data travels in small
@@ -26,18 +17,22 @@ write a smart routing policy in ordinary code.
 This project builds a small emulated SDN and asks:
 
 1. **Is a learning algorithm (reinforcement learning) better at choosing
-   routes than simple rules?** Answer found: **no. It matches the best
-   simple rule where it was trained and clearly beats load-blind routing,
-   but it never exceeds the simple rule** (see section 7). The first version of its state, which
-   could not tell *which* link was busy, did worse than random choice.
+   routes than simple rules?** Answer found: **no. In the tests it was
+   trained for, it matches the best simple rule and beats load-blind
+   routing, but it never exceeds the simple rule, and it does not carry
+   over to eight simultaneous flows or to mixed TCP/UDP traffic** (see
+   section 7). The first version of its state, which could not tell *which*
+   link was busy, did worse than random choice.
 2. **Can the network treat important traffic (latency-sensitive UDP)
    differently from bulk traffic (TCP) without hurting the bulk traffic?**
    Answer: **yes**, and it was verified link by link.
 3. **Can an anomaly detector automatically steer traffic away from links
-   behaving abnormally, without making things worse?** Answer: it detects
-   correctly, but without damping it **oscillates** under a sustained flood
-   and made one path unreachable 99.4% of the time. This is documented
-   rather than fixed.
+   behaving abnormally, without making things worse?** Answer: not safely at
+   first. Without damping it **oscillated** under a sustained flood and made
+   one path unreachable 99.4% of the time. Damping (hysteresis and a rule
+   never to cut a switch off completely) made it stable in a check run, but
+   it still cannot tell a flood from legitimate full-rate traffic, so it is
+   not a useful flood detector (see section 7, RQ3).
 
 On top of the experiments there is a **live web dashboard**: pick an
 algorithm, pick two hosts, click Run, and watch the controller choose
@@ -45,7 +40,7 @@ routes in real time.
 
 This is the same class of problem as traffic engineering in telecom
 transport and backhaul networks. It is **not** a 5G, network-slicing or NFV
-project, so do not describe it as one.
+project.
 
 ## 2. Key ideas in two minutes
 
@@ -100,6 +95,8 @@ edge:         [7] [8]    [9] [10]
 2. The controller (`controller.py`) works out the candidate paths from
    switch 7 to switch 9 using the live network graph, and asks the
    **selected algorithm** to pick one (`pick_path()`).
+   A flow is decided once: packets that reach other switches before the new
+   rules do reuse the same decision (cache, 5 s).
 3. The controller installs a rule on every switch along the chosen path.
    From then on the packets of that flow follow it with no further
    controller involvement. Rules expire after 10 s idle.
@@ -138,12 +135,16 @@ one at start-up from the `SDN_ALGORITHM` environment variable.
 - **Failure handling.** The controller listens for port-status events.
   When a link dies it deletes flow rules through it immediately, so recovery
   comes from real rerouting rather than waiting for rules to time out.
-  Measured control-plane recovery: 0.08-0.16 s.
+  Measured (10 repetitions, ping every 5 ms): a flow on the failed link is
+  cut for about 30 ms; first reply after links are restored 30-37 ms.
 - **Anomaly-aware exclusion.** An Isolation Forest, trained offline on
-  310,212 samples of this project's own legitimate traffic, scores each
-  link's live rate. A link flagged as anomalous is excluded from routing
-  through the same mechanism used for physical failures, and re-admitted
-  when it looks normal again.
+  this project's own legitimate traffic (`experiments/train_anomaly_valid.py`),
+  scores each link's live rate. A link flagged as anomalous is excluded from
+  routing through the same mechanism used for physical failures, and
+  re-admitted when it looks normal again. Damping: 3 anomalous readings in a
+  row to exclude, 10 normal ones to restore, and a switch is never cut off
+  completely. It cannot tell a flood from legitimate full-rate traffic (see
+  RQ3 in section 7). The model is **off by default** (`models/anomaly_model.joblib.off`).
 
 ## 7. What we found
 
@@ -305,9 +306,10 @@ compared with shortest-path routing.
 
 - The anomaly layer is damped and cannot partition a switch, but it cannot
   distinguish a flood from legitimate full-rate traffic. The model is
-  enabled by default after
-  `ryu-env/bin/python experiments/train_anomaly_valid.py`; move it to
-  `models/anomaly_model.joblib.off` for routing experiments.
+  **off by default** (`models/anomaly_model.joblib.off`). For the anomaly
+  demo, train it with `ryu-env/bin/python experiments/train_anomaly_valid.py`
+  and rename it to `models/anomaly_model.joblib`; turn it off again for
+  routing experiments and the Compare tab.
 - One training episode delivered only 1.3 Mbps and was not explained.
 - An early n=5 pilot suggested Round-Robin was more consistent; at n=20
   that vanished (small-sample artifact, reported rather than dropped).
@@ -317,13 +319,15 @@ compared with shortest-path routing.
 ```bash
 # from ~/sdn-rl, nothing else running
 bash reproduce.sh quick     # ~10 min: checks everything works
-bash reproduce.sh full      # ~6-7 h: every experiment above
+bash reproduce.sh full      # ~7 h: the routing, mixed-traffic, failure and QoS experiments
 ```
+
+The anomaly check (RQ3) is not part of the script. `quick` mode was run
+end to end; `full` mode was assembled from experiments that were each run
+separately and was not executed in one go from a clean start.
 
 Setup (two Python environments) is in `SETUP.md`. The anomaly model is
 moved aside automatically; restore it for the anomaly demo.
-
-Full write-up: `SDN_RL_Load_Balancing_Report.docx`.
 
 ## 8. The live dashboard
 
@@ -576,6 +580,8 @@ protects latency-sensitive traffic without hurting bulk traffic.
 
 ### Research Questions
 
+(Section 7 adds a third question, RQ3, on anomaly-aware exclusion.)
+
 1. Does RL-based load balancing beat simple heuristics — and where
    specifically (congestion, bursts, failures) does that advantage show
    up or disappear?
@@ -627,21 +633,7 @@ time after failure
 **Should-have:** fairness across flows (Jain's index), convergence time,
 decision latency, reroute count
 
-### Explicitly Out of Scope
-
-Docker/Kubernetes, Kafka/Redis, Prometheus/Grafana, DQN/PPO/deep RL,
-cloud deployment. (The dashboard was originally listed here as optional
-polish; it was built after all, as FastAPI + a lab daemon + a single-file
-React page -- see section 8.)
-
-### Telecom Framing (for CV, Tunisian market)
-
-Fair to describe as: "SDN-based dynamic traffic engineering — the same
-class of problem used in transport-network/backhaul traffic engineering."
-
-NOT a 5G/slicing/NFV project — don't overclaim that.
-
-### Environment Setup (done)
+### Environment Setup
 
 - **Open vSwitch** 3.3.4 — system-wide
 - **Mininet** 2.3.0 — system-wide, runs on system Python 3.12
@@ -666,164 +658,3 @@ source ryu-env/bin/activate
 
 Deactivate with `deactivate` when done. Mininet commands don't need the
 venv active at all.
-
-### Project Status / Where I Am
-
-- [x] Hardware and topology size confirmed
-- [x] Mininet, OVS, Ryu all installed and verified working
-- [x] Mininet official beginner tutorial (nodes, net, dump, link up/down, pingall)
-- [x] Fat-tree topology built (fattree_topo.py) -- 10 switches, 8 hosts,
-      explicit dpids 1-10 (auto dpid-from-name collides badly, e.g.
-      a1/c1/e1 would all get dpid 1 -- must set dpid explicitly)
-- [x] Custom Ryu controller built (fattree_controller.py) -- hardcoded
-      adjacency graph + BFS shortest path + exact-match flow install.
-      No STP, no flooding. Verified: pingall 0% dropped (56/56)
-      NOTE: Ryu's demo simple_switch_stp_13 app was tried first and does
-      NOT converge reliably on a mesh this dense (2 agg x 2 core per pod)
-      -- don't retry it, went straight to a custom controller instead.
-- [ ] SDN/OpenFlow concept review
-- [ ] Basic RL/Q-learning intuition review
-- [ ] Step 1: Core network + baselines (topology + controller base done;
-      still need Round-Robin + Least-Congested-Path path SELECTION logic,
-      plus stats collection/CSV/plots)
-- [x] Step 2a: Q-learning skeleton built (algorithms/q_learning.py) --
-      congestion-aware state (node, dst, congestion bucket), hop-by-hop
-      epsilon-greedy action selection, multi-step Bellman backup walked
-      backward through the hop trajectory, time-based epsilon decay.
-      Mechanically validated: epsilon decayed 0.895->0.050 correctly,
-      Q-table converged to a stable 21 states, zero invalid paths or
-      crashes across 55+ trials.
-- [x] Step 2b: RESOLVED via Step 5's 3-flow pigeonhole scenario.
-      n=20 trials per algorithm (round_robin, least_congested,
-      least_congested_qos, q_learning), h1->h3/h2->h4/h1->h4 forcing a
-      structural collision on a 2-path switch pair.
-      Jain's fairness index, mean (std): round_robin 0.905 (0.049),
-      least_congested 0.918 (0.064), least_congested_qos 0.920 (0.041),
-      q_learning 0.908 (0.059).
-      FINDING (n=20, confirms n=5 pilot): even under a forced, structural
-      collision, no algorithm differentiates meaningfully on fairness at
-      this topology scale -- all four means fall within 0.015 of each
-      other. Extends the original Step 1 "path redundancy dominates"
-      finding rather than resolving it in RL's favor.
-      CORRECTION to the n=5 pilot: that run showed round_robin's std
-      (0.012) as 3-4x tighter than the other algorithms', suggested as
-      a "determinism vs. reactive-noise" effect. At n=20 this did NOT
-      hold -- round_robin's std rose to 0.049, now mid-pack rather than
-      an outlier. The n=5 tightness was a small-sample artifact, not a
-      real property of the algorithm. Kept here as a documented example
-      of why the project increased trial counts before finalizing a
-      claim, rather than silently dropping the earlier wrong statement.
-      Known data-quality note: 2/80 total rows (least_congested trials
-      2, 15) have a missing flowA reading due to a tight timing margin
-      in the script (flow A's log is read ~1s after its expected finish
-      time); both affected rows show artificially near-perfect fairness
-      since Jain's index over 2 close values trivially approaches 1.0.
-      Not corrected for in the stats above (2/80 points, doesn't change
-      the conclusion) -- script fix identified (widen the post-flow-C
-      sleep from 6s to 10s) for a future clean rerun if needed.
-- [x] Step 3: CLOSED -- Traffic classes (UDP/TCP + QoS enforcement).
-      OpenFlow meter-based QoS in controller.py: TCP (ip_proto==6) capped
-      at BULK_METER_RATE_KBPS=5000 (5 Mbps), UDP unmetered. pingall clean
-      (0% dropped) after meter install.
-      VALIDATED same-pod (2026-09-25): TCP h2->h1 capped at 5.31 Mbps,
-      UDP h4->h3 (8M target) passed at 8.39-8.41 Mbps, 0% loss. Confirms
-      meter discriminates correctly by ip_proto.
-      VALIDATED cross-pod under real path selection (2026-09-25): TCP
-      h1->h5 capped at 5.32 Mbps, UDP h2->h6 sent 8.39 Mbps -- both
-      concurrent with LCP genuinely selecting among 8 candidate paths
-      (confirmed in controller log), not the single-path case from the
-      same-pod test. Confirms QoS enforcement and multi-path routing
-      coexist without interaction bugs.
-      (Note: UDP server-side report was corrupted by an iperf2
-      integer-underflow artifact from killing the background server
-      mid-report -- client-side send rate, which matched the same-pod
-      baseline, is the reliable number here.)
-      
-- [x] Step 4: CLOSED -- Class-aware routing.
-      New algorithms/least_congested_qos.py: UDP keeps class-agnostic
-      LCP's min-bottleneck policy unchanged; TCP actively avoids links
-      in active_udp_links (tracked via controller.py's cookie-based
-      flow-removal handler, see below), falling back to min-bottleneck
-      only if every candidate path overlaps active UDP traffic.
-      algorithms/q_learning.py: state now includes flow_class, and
-      reward is weighted by UDP_PENALTY_MULTIPLIER=2.0 so equivalent
-      congestion penalizes UDP more heavily than TCP.
-      controller.py: added flow_class detection (ip_proto 6/17), cookie-
-      per-UDP-link tracking with OFPFF_SEND_FLOW_REM + a
-      flow_removed_handler to decrement/clear active_udp_links when UDP
-      flows expire. pick_path() kwargs are passed via inspect.signature
-      introspection so class-agnostic algorithms (round_robin,
-      least_congested) remain untouched and unaffected.
-      VALIDATED (2026-09-25): concurrent UDP h2->h6 (8M target) and TCP
-      h1->h5, both cross-pod with 8 candidate paths available. TCP
-      confirmed 5.32 Mbps (meter cap intact), UDP confirmed 8.39 Mbps
-      sent. Controller log shows TCP flow logged "tcp: avoided active
-      UDP links" (not a silent fallback), and path comparison confirms
-      the two flows shared zero links despite both transiting switch 5
-      as a common intermediate hop -- avoidance is genuinely link-level,
-      not coincidental.
-            UPDATE (2026-09-25): class-aware q_learning.py run-tested under the
-      same concurrent UDP+TCP scenario as LCP-QoS. Zero crashes across
-      the full run, all 10 switches connected, 4-tuple state key
-      (node, dst, bucket, flow_class) confirmed working through the
-      Bellman backup with no schema errors. TCP still capped at 5.29
-      Mbps (meter enforcement correctly independent of algorithm). Path
-      choices for repeated identical (state) decisions were highly
-      variable (epsilon only decayed 0.773->0.641 over the ~15s run,
-      so exploration dominated throughout) -- this is expected, not a
-      bug: same root cause as the Step 2b finding (short single-run
-      windows can't show convergence). Q-table grew steadily (4->35
-      states), confirming healthy exploration. Class-aware differentiation
-      (does UDP consistently avoid congestion better than TCP once
-      converged) remains unproven and is deferred alongside Step 2b to
-      Step 5's longer, multi-trial experiment runs, where epsilon will
-      actually decay meaningfully and repeated trials can show a
-      learned policy rather than exploration noise.
-      
-- [x] Step 5: Failure/recovery scenario (single + overlapping double
-      failure) -- BUILT AND VALIDATED.
-      New capability added (not just an experiment script): topology.py
-      gained a live, mutable adjacency (set_link_down()/set_link_up(),
-      mutating ADJACENCY in place so every algorithm respects failures
-      immediately with zero algorithm-file changes) plus a frozen
-      static copy for port/neighbor lookups that survive a link being
-      marked down. controller.py gained an EventOFPPortStatus handler
-      that detects real link failures and proactively evicts flow
-      entries routed through the dead link, so recovery is driven by
-      actual rerouting rather than idle_timeout=10 expiring.
-      Test: h1<->h5 (cross-pod, 8 candidate paths). Phase 1: single
-      link (e1<->a1) down -- reroutes via a2. Phase 2: overlapping
-      failure (e1<->a2 also down) -- e1 fully isolated, zero uplinks.
-      Phase 3: both restored.
-      VALIDATED (2026-09-26, least_congested): control-plane recovery
-      -- Phase 1: 0.162s, Phase 3: 0.084s (first successful ping after
-      injection/restoration). Phase 2: 0 pings during full isolation,
-      as expected -- confirmed via controller log ("No path from switch
-      7 to 9") rather than a silent failure. Controller log confirms
-      genuine rerouting, not a cached/coincidental path: pre-failure
-      "1 candidates" on the direct link becomes "3 candidates, chose
-      [1, 8, 2, 7]" (detour via e2/a2) immediately after injection.
-      Observed harness artifact: each configLinkStatus() call produces
-      a brief down->up->down flap in port-status events (~ms window,
-      likely asymmetric veth-pair teardown timing in Mininet) --
-      harmless since set_link_down()/up() are idempotent, and resolved
-      well before the next 0.2s-interval ping; noted for methodology,
-      not a controller bug.
-      SEPARATE FINDING -- network recovery vs. flow recovery are
-      different timescales: the pre-existing TCP iperf flow did NOT
-      resume immediately after Phase 3's 0.084s network-level recovery
-      -- it stayed at 0 bits/sec until t=49s, roughly 24s after both
-      links were restored. This is standard TCP exponential backoff
-      (the flow had been fully stalled for the ~15s of Phase 2's total
-      isolation, pushing its retransmission timer out), not a
-      controller or routing defect -- confirmed by extending the post-
-      recovery observation window from 5s to 30s and watching the flow
-      resume on its own, then continue at the normal ~4-6 Mbps
-      meter-capped rate. Reportable distinction for the "recovery time"
-      KPI: network-level (control-plane) recovery and flow-level
-      (transport-layer) recovery are not the same measurement, and the
-      gap between them can be much larger than the network's own
-      reaction time.
-- [x] Step 6: Live dashboard -- built; see section 8 at the top.
-      Hysteresis for the anomaly oscillation: decided NOT to implement;
-      documented as-is, listed as future work.
